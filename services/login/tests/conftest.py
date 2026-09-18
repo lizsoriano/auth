@@ -104,7 +104,7 @@ class FakeMailer:
 
     @property
     def last_token(self):
-        return self.sent[-1]["link"].rsplit("/", 1)[1]
+        return self.sent[-1]["link"].rsplit("/", 1)[1].split("?")[0]
 
 
 @pytest.fixture

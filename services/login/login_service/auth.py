@@ -111,7 +111,8 @@ class AuthService:
         return token, (self._hash_token(token), now, expires)
 
     def _send_verification(self, user_row, token):
-        link = f"{self.settings.public_base_url}/verify/{token}"
+        fmt = self.settings.email_link_format
+        link = f"{self.settings.public_base_url}/verify/{token}" + (f"?format={fmt}" if fmt else "")
         try:
             self.mailer.send_verification(user_row["email"], user_row["nombre"] or user_row["display_name"], link,
                                           self.settings.email_token_ttl_hours)

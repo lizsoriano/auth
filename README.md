@@ -7,7 +7,8 @@ logout**, con respuestas en **XML** (por defecto) o **JSON** (`?format=json`), y
 ```
 auth/
 ├── services/login/   # el microservicio (Flask + Psycopg 3 + PostgreSQL), puerto 5000 → ver su README
-└── data/             # esquema canónico (schema.sql), migraciones, rollbacks y auditoría de la BD
+├── data/             # esquema canónico (schema.sql), migraciones, rollbacks y auditoría de la BD
+└── deploy/           # scripts de despliegue en la VM (BD, relay de Gmail/Postfix y demostración con curl)
 ```
 
 - **Empieza aquí:** [`services/login/README.md`](services/login/README.md) (instalación, Postfix, endpoints, Postman).
