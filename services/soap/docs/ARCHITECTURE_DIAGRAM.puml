@@ -1,0 +1,104 @@
+@startuml ARCHITECTURE_DIAGRAM
+!pragma teoz true
+title Macro-arquitectura — módulo SOAP de clasificación Cloud + monolito de biblioteca\n(dos aplicaciones independientes, una sola base de datos compartida)
+
+skinparam backgroundColor #FAFAFA
+skinparam componentStyle rectangle
+skinparam roundcorner 8
+skinparam shadowing false
+skinparam ArrowColor #334155
+skinparam ArrowFontColor #334155
+skinparam defaultFontName Segoe UI
+skinparam package {
+    BackgroundColor #F8FAFC
+    BorderColor #64748B
+    FontColor #0F172A
+    FontStyle bold
+}
+skinparam component {
+    BackgroundColor #FFFFFF
+    BorderColor #64748B
+    FontColor #0F172A
+}
+skinparam database {
+    BackgroundColor #ECFDF5
+    BorderColor #047857
+    FontColor #064E3B
+}
+skinparam note {
+    BackgroundColor #FFFBEB
+    BorderColor #B45309
+    FontColor #78350F
+}
+
+actor "Persona clasificadora" as persona
+
+package "Aplicación de escritorio (cliente SOAP)\nDueño: ejercicio SOAP — fuera de library_soap_service" as EscritorioPkg #FFF7ED {
+    component "Cliente SOAP\n(Tkinter / consumidor de\ninteroperabilidad, p. ej. Zeep)" as Cliente
+    note bottom of Cliente
+        Genera su stub a partir de
+        wsdl/library-classifier.wsdl.
+        No conoce PostgreSQL ni
+        SQL: sólo construye/envía
+        sobres SOAP.
+    end note
+}
+
+package "Módulo SOAP — library_soap_service/ (Flask/Python)\nDueño: este proyecto" as SoapPkg #EEF2FF {
+    component "soap/service.py\n(handlers de las 4 operaciones\ndel WSDL)" as Service
+    component "soap/security.py\n(valida wsse:UsernameToken /\nPasswordDigest, nonce, ventana\nde tolerancia)" as Security
+    component "soap/faults.py\n(construye <soap:Fault>,\nnunca expone SQL/stack trace)" as Faults
+    component "soap/db.py\n(psycopg2, SQL parametrizado,\ntransacción explícita en\nRegistrarClasificacion)" as Db
+
+    Service --> Security : valida cabecera WS-Security\n(sólo ObtenerEstadisticasPorModelo)
+    Service --> Faults : errores de negocio / internos
+    Service --> Db : SELECT / INSERT parametrizados
+}
+
+package "Monolito Node.js — integracion02/apps/web-monolito\nDueño: proyecto integracion02 (no se modifica)" as MonoPkg #F1F5F9 {
+    component "Express + EJS\n(rutas + vistas SSR)" as Express
+    component "src/config/db.js\n(pool pg, SQL parametrizado,\nsp_*/triggers/vistas)" as PgJs
+
+    Express --> PgJs
+}
+
+database "PostgreSQL — library_db\n(instancia única compartida)" as DB {
+    component "Tablas del catálogo\n(propiedad del monolito):\nbooks, categories, concepts,\nbook_concepts, authors, genres,\nformats, users, book_authors,\nbook_genres, book_images" as TablasCatalogo
+    component "Tablas propias del módulo SOAP:\nclasificadores,\nclasificaciones_cloud,\nclientes_servidos,\nsoap_service_credenciales" as TablasSoap
+}
+
+persona --> Cliente : usa la app de escritorio
+Cliente -down-> Service : HTTP POST /soap\n(XML, SOAP 1.1, urn:library-classifier)
+Service -down-> Faults
+Db -down-> TablasCatalogo : sólo SELECT\n(rol soap_service_user)
+Db -down-> TablasSoap : SELECT / INSERT\n(INSERT/UPDATE sólo en\nclientes_servidos; nunca DELETE)
+
+Express -down-> TablasCatalogo : SELECT/INSERT/UPDATE/DELETE\n(rol library_user, CRUD completo)
+
+note right of DB
+  Una sola instancia PostgreSQL.
+  Cada aplicación se conecta con
+  su propio rol de mínimo privilegio:
+  - library_user (monolito): dueño
+    real del catálogo, CRUD completo.
+  - soap_service_user (módulo SOAP):
+    sólo SELECT en el catálogo, sin
+    DELETE en ninguna tabla, sin
+    acceso a users/authors/formats/
+    genres/book_authors/book_genres/
+    book_images.
+  Ningún proceso conoce al otro:
+  el acoplamiento es únicamente
+  a través del esquema compartido
+  (ver docs/WSDL_AUDIT.md, riesgo R-02).
+end note
+
+note bottom of MonoPkg
+  El monolito no sabe que el módulo
+  SOAP existe. No hay llamadas
+  Node → Flask ni Flask → Node:
+  la única superficie compartida
+  es la base de datos.
+end note
+
+@enduml

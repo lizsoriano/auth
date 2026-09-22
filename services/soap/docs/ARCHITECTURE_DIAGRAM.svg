@@ -1,0 +1,69 @@
+<svg viewBox="0 0 920 660" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1c2b3a"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="920" height="660" fill="#ffffff"/>
+
+  <text x="460" y="34" text-anchor="middle" font-size="22" font-weight="700" fill="#1c2b3a">
+    Macro-arquitectura — módulo SOAP de clasificación Cloud
+  </text>
+  <text x="460" y="56" text-anchor="middle" font-size="14" fill="#5a6b7a">
+    Cada proceso corre y se despliega de forma independiente; solo comparten PostgreSQL (library_db)
+  </text>
+
+  <!-- Aplicación de escritorio -->
+  <rect x="60" y="90" width="300" height="110" rx="10" fill="#eaf2f8" stroke="#2f6690" stroke-width="2"/>
+  <text x="210" y="118" text-anchor="middle" font-size="16" font-weight="700" fill="#1c2b3a">Aplicación de escritorio</text>
+  <text x="210" y="138" text-anchor="middle" font-size="13" fill="#3a4a5a">Tkinter (gui.py) — pestaña "Clasificación SOAP"</text>
+  <text x="210" y="158" text-anchor="middle" font-size="13" fill="#3a4a5a">soap_client.py — ElementTree + urllib</text>
+  <text x="210" y="178" text-anchor="middle" font-size="12" fill="#6a7a8a">sin conocer PostgreSQL, todo vía SOAP</text>
+
+  <!-- Módulo SOAP Flask -->
+  <rect x="60" y="290" width="300" height="130" rx="10" fill="#eaf6ee" stroke="#2f7a4f" stroke-width="2"/>
+  <text x="210" y="318" text-anchor="middle" font-size="16" font-weight="700" fill="#1c2b3a">Módulo SOAP — Flask</text>
+  <text x="210" y="338" text-anchor="middle" font-size="13" fill="#3a4a5a">app.py — GET /wsdl · POST /soap</text>
+  <text x="210" y="356" text-anchor="middle" font-size="13" fill="#3a4a5a">soap/ (envelope · service · security · faults)</text>
+  <text x="210" y="374" text-anchor="middle" font-size="13" fill="#3a4a5a">db/repository.py — solo invoca funciones/vista</text>
+  <text x="210" y="394" text-anchor="middle" font-size="12" fill="#6a7a8a">127.0.0.1 : 5000 — proyecto independiente</text>
+
+  <!-- Monolito -->
+  <rect x="560" y="290" width="300" height="130" rx="10" fill="#faf0e6" stroke="#a05a2c" stroke-width="2"/>
+  <text x="710" y="318" text-anchor="middle" font-size="16" font-weight="700" fill="#1c2b3a">Monolito — Node.js/Express</text>
+  <text x="710" y="338" text-anchor="middle" font-size="13" fill="#3a4a5a">apps/web-monolito (Ejercicio Guiado 02)</text>
+  <text x="710" y="356" text-anchor="middle" font-size="13" fill="#3a4a5a">EJS + pg — catálogo, login, roles</text>
+  <text x="710" y="374" text-anchor="middle" font-size="13" fill="#b23"  font-weight="700">NO modificado por este ejercicio</text>
+  <text x="710" y="394" text-anchor="middle" font-size="12" fill="#6a7a8a">127.0.0.1 : 3000 — despliegue independiente</text>
+
+  <!-- PostgreSQL -->
+  <rect x="260" y="520" width="400" height="110" rx="10" fill="#1c2b3a" stroke="#1c2b3a" stroke-width="2"/>
+  <text x="460" y="552" text-anchor="middle" font-size="17" font-weight="700" fill="#ffffff">PostgreSQL — library_db</text>
+  <text x="460" y="574" text-anchor="middle" font-size="12" fill="#cfe0ee">Único punto de contacto entre ambas aplicaciones</text>
+  <text x="460" y="592" text-anchor="middle" font-size="12" fill="#cfe0ee">instancia GCP (maquina-02) — PostgreSQL 16</text>
+  <text x="460" y="612" text-anchor="middle" font-size="12" fill="#f0c419">sin FK de escritura entre ambos esquemas</text>
+
+  <!-- Flecha escritorio -> módulo SOAP -->
+  <line x1="210" y1="200" x2="210" y2="285" stroke="#1c2b3a" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="222" y="235" font-size="12.5" fill="#1c2b3a">HTTP POST /soap</text>
+  <text x="222" y="250" font-size="12.5" fill="#1c2b3a">XML, SOAP 1.1</text>
+
+  <!-- Flecha módulo SOAP -> Postgres -->
+  <line x1="240" y1="420" x2="345" y2="515" stroke="#2f7a4f" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="248" y="465" font-size="12.5" fill="#2f7a4f">psycopg2</text>
+  <text x="248" y="480" font-size="12.5" fill="#2f7a4f">rol soap_service_user</text>
+  <text x="248" y="495" font-size="12.5" fill="#2f7a4f">solo EXECUTE/SELECT en</text>
+  <text x="248" y="509" font-size="12.5" fill="#2f7a4f">funciones y vista (ED-11)</text>
+
+  <!-- Flecha monolito -> Postgres -->
+  <line x1="680" y1="420" x2="580" y2="515" stroke="#a05a2c" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="588" y="465" font-size="12.5" fill="#a05a2c" text-anchor="start">pg (driver Node.js)</text>
+  <text x="588" y="480" font-size="12.5" fill="#a05a2c" text-anchor="start">rol library_user</text>
+  <text x="588" y="495" font-size="12.5" fill="#a05a2c" text-anchor="start">(propio, sin relación con</text>
+  <text x="588" y="509" font-size="12.5" fill="#a05a2c" text-anchor="start">soap_service_user)</text>
+
+  <!-- Frontera módulo SOAP vs monolito -->
+  <line x1="460" y1="290" x2="460" y2="420" stroke="#b0bcc6" stroke-width="1.5" stroke-dasharray="6,5"/>
+  <text x="460" y="280" text-anchor="middle" font-size="11.5" fill="#8a97a3">sin acoplamiento de proceso ni de red — solo la base de datos</text>
+</svg>

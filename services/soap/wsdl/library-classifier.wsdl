@@ -1,0 +1,258 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  library-classifier.wsdl
+
+  Contrato del módulo SOAP de clasificación Cloud del catálogo de la
+  librería. Documento primero, implementación después (Parte 5 del
+  enunciado): este archivo es la fuente de verdad de qué operaciones,
+  tipos y mensajes expone el servicio. soap/service.py debe implementar
+  exactamente esto, no al revés.
+
+  Estilo: document/literal, SOAP 1.1 sobre HTTP. Namespace del contrato:
+  urn:library-classifier.
+
+  Auditoría de exposición (ver docs/CONTRATO_DISENO.md para el detalle
+  columna por columna): se exponen isbn/título/categoría/concepto/
+  definición porque el clasificador los necesita para saber qué está
+  clasificando; NUNCA se exponen columnas internas del monolito como
+  users.password_hash, books.stock/price, ni claves de conexión.
+-->
+<definitions name="LibraryClassifierService"
+    targetNamespace="urn:library-classifier"
+    xmlns="http://schemas.xmlsoap.org/wsdl/"
+    xmlns:tns="urn:library-classifier"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+    xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/">
+
+    <types>
+        <xsd:schema targetNamespace="urn:library-classifier"
+            xmlns:tns="urn:library-classifier">
+
+            <!-- ============== Tipos comunes ============== -->
+
+            <xsd:simpleType name="ModeloCloud">
+                <xsd:restriction base="xsd:string">
+                    <xsd:enumeration value="IaaS"/>
+                    <xsd:enumeration value="PaaS"/>
+                    <xsd:enumeration value="SaaS"/>
+                    <xsd:enumeration value="FaaS"/>
+                </xsd:restriction>
+            </xsd:simpleType>
+
+            <!-- ============== ObtenerConceptosPendientes ============== -->
+            <!--
+              "Pendiente" = existe en book_concepts pero el correo dado
+              (si se envía) todavía no lo registró en clasificaciones_cloud.
+              Si filtroCorreo se omite, devuelve el catálogo completo de
+              conceptos clasificables (útil para explorar antes de
+              identificarse).
+            -->
+
+            <xsd:element name="ObtenerConceptosPendientesRequest">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="filtroCorreo" type="xsd:string"
+                            minOccurs="0"/>
+                        <xsd:element name="filtroCategoria" type="xsd:string"
+                            minOccurs="0"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+
+            <xsd:complexType name="ConceptoPendiente">
+                <xsd:sequence>
+                    <xsd:element name="bookId" type="xsd:long"/>
+                    <xsd:element name="isbn" type="xsd:string"/>
+                    <xsd:element name="tituloLibro" type="xsd:string"/>
+                    <xsd:element name="categoria" type="xsd:string"/>
+                    <xsd:element name="conceptoId" type="xsd:long"/>
+                    <xsd:element name="concepto" type="xsd:string"/>
+                    <xsd:element name="definicion" type="xsd:string"/>
+                </xsd:sequence>
+            </xsd:complexType>
+
+            <xsd:element name="ObtenerConceptosPendientesResponse">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="concepto" type="tns:ConceptoPendiente"
+                            minOccurs="0" maxOccurs="unbounded"/>
+                        <xsd:element name="total" type="xsd:int"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+
+            <!-- ============== RegistrarClasificacion ============== -->
+
+            <xsd:element name="RegistrarClasificacionRequest">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="nombre" type="xsd:string"/>
+                        <xsd:element name="apellidos" type="xsd:string"/>
+                        <xsd:element name="correo" type="xsd:string"/>
+                        <xsd:element name="bookId" type="xsd:long"/>
+                        <xsd:element name="conceptoId" type="xsd:long"/>
+                        <xsd:element name="modeloCloud" type="tns:ModeloCloud"/>
+                        <xsd:element name="tipoCliente" type="xsd:string"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+
+            <xsd:element name="RegistrarClasificacionResponse">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="clasificacionId" type="xsd:long"/>
+                        <xsd:element name="modeloCloud" type="tns:ModeloCloud"/>
+                        <xsd:element name="clasificadoEn" type="xsd:dateTime"/>
+                        <xsd:element name="mensaje" type="xsd:string"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+
+            <!-- ============== ObtenerProgresoUsuario ============== -->
+
+            <xsd:element name="ObtenerProgresoUsuarioRequest">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="correo" type="xsd:string"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+
+            <xsd:element name="ObtenerProgresoUsuarioResponse">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="correo" type="xsd:string"/>
+                        <xsd:element name="totalConceptos" type="xsd:int"/>
+                        <xsd:element name="totalClasificados" type="xsd:int"/>
+                        <xsd:element name="totalPendientes" type="xsd:int"/>
+                        <xsd:element name="porcentajeCompletado" type="xsd:decimal"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+
+            <!-- ============== ObtenerEstadisticasPorModelo (Tarea 1) ==============
+                 Operación sensible: requiere cabecera WS-Security
+                 (wsse:UsernameToken con PasswordDigest) — ver soap/security.py
+                 y docs/CONTRATO_DISENO.md, decisión D-07. No lleva credenciales
+                 en el Body; van en soap:Header.
+            -->
+
+            <xsd:element name="ObtenerEstadisticasPorModeloRequest">
+                <xsd:complexType>
+                    <xsd:sequence/>
+                </xsd:complexType>
+            </xsd:element>
+
+            <xsd:complexType name="EstadisticaModelo">
+                <xsd:sequence>
+                    <xsd:element name="modeloCloud" type="tns:ModeloCloud"/>
+                    <xsd:element name="totalClasificaciones" type="xsd:int"/>
+                    <xsd:element name="porcentaje" type="xsd:decimal"/>
+                </xsd:sequence>
+            </xsd:complexType>
+
+            <xsd:element name="ObtenerEstadisticasPorModeloResponse">
+                <xsd:complexType>
+                    <xsd:sequence>
+                        <xsd:element name="estadistica" type="tns:EstadisticaModelo"
+                            minOccurs="0" maxOccurs="unbounded"/>
+                        <xsd:element name="totalGeneral" type="xsd:int"/>
+                    </xsd:sequence>
+                </xsd:complexType>
+            </xsd:element>
+
+        </xsd:schema>
+    </types>
+
+    <!-- ============== Mensajes ============== -->
+
+    <message name="ObtenerConceptosPendientesInput">
+        <part name="parameters" element="tns:ObtenerConceptosPendientesRequest"/>
+    </message>
+    <message name="ObtenerConceptosPendientesOutput">
+        <part name="parameters" element="tns:ObtenerConceptosPendientesResponse"/>
+    </message>
+
+    <message name="RegistrarClasificacionInput">
+        <part name="parameters" element="tns:RegistrarClasificacionRequest"/>
+    </message>
+    <message name="RegistrarClasificacionOutput">
+        <part name="parameters" element="tns:RegistrarClasificacionResponse"/>
+    </message>
+
+    <message name="ObtenerProgresoUsuarioInput">
+        <part name="parameters" element="tns:ObtenerProgresoUsuarioRequest"/>
+    </message>
+    <message name="ObtenerProgresoUsuarioOutput">
+        <part name="parameters" element="tns:ObtenerProgresoUsuarioResponse"/>
+    </message>
+
+    <message name="ObtenerEstadisticasPorModeloInput">
+        <part name="parameters" element="tns:ObtenerEstadisticasPorModeloRequest"/>
+    </message>
+    <message name="ObtenerEstadisticasPorModeloOutput">
+        <part name="parameters" element="tns:ObtenerEstadisticasPorModeloResponse"/>
+    </message>
+
+    <!-- ============== PortType ============== -->
+
+    <portType name="LibraryClassifierPortType">
+        <operation name="ObtenerConceptosPendientes">
+            <input message="tns:ObtenerConceptosPendientesInput"/>
+            <output message="tns:ObtenerConceptosPendientesOutput"/>
+        </operation>
+        <operation name="RegistrarClasificacion">
+            <input message="tns:RegistrarClasificacionInput"/>
+            <output message="tns:RegistrarClasificacionOutput"/>
+        </operation>
+        <operation name="ObtenerProgresoUsuario">
+            <input message="tns:ObtenerProgresoUsuarioInput"/>
+            <output message="tns:ObtenerProgresoUsuarioOutput"/>
+        </operation>
+        <!-- Requiere WS-Security (wsse:UsernameToken) en soap:Header. -->
+        <operation name="ObtenerEstadisticasPorModelo">
+            <input message="tns:ObtenerEstadisticasPorModeloInput"/>
+            <output message="tns:ObtenerEstadisticasPorModeloOutput"/>
+        </operation>
+    </portType>
+
+    <!-- ============== Binding ============== -->
+
+    <binding name="LibraryClassifierBinding" type="tns:LibraryClassifierPortType">
+        <soap:binding style="document"
+            transport="http://schemas.xmlsoap.org/soap/http"/>
+
+        <operation name="ObtenerConceptosPendientes">
+            <soap:operation soapAction="urn:library-classifier#ObtenerConceptosPendientes"/>
+            <input><soap:body use="literal"/></input>
+            <output><soap:body use="literal"/></output>
+        </operation>
+
+        <operation name="RegistrarClasificacion">
+            <soap:operation soapAction="urn:library-classifier#RegistrarClasificacion"/>
+            <input><soap:body use="literal"/></input>
+            <output><soap:body use="literal"/></output>
+        </operation>
+
+        <operation name="ObtenerProgresoUsuario">
+            <soap:operation soapAction="urn:library-classifier#ObtenerProgresoUsuario"/>
+            <input><soap:body use="literal"/></input>
+            <output><soap:body use="literal"/></output>
+        </operation>
+
+        <operation name="ObtenerEstadisticasPorModelo">
+            <soap:operation soapAction="urn:library-classifier#ObtenerEstadisticasPorModelo"/>
+            <input><soap:body use="literal"/></input>
+            <output><soap:body use="literal"/></output>
+        </operation>
+    </binding>
+
+    <!-- ============== Service ============== -->
+
+    <service name="LibraryClassifierService">
+        <port name="LibraryClassifierPort" binding="tns:LibraryClassifierBinding">
+            <soap:address location="http://localhost:5000/soap"/>
+        </port>
+    </service>
+
+</definitions>

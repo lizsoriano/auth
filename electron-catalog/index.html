@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Catálogo de libros</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">BIBLIOTECA DIGITAL</p>
+        <h1>Catálogo de libros</h1>
+      </div>
+      <button id="settings-button" class="secondary" type="button" aria-expanded="false">Configuración</button>
+    </header>
+
+    <section id="settings" class="settings" hidden>
+      <label for="endpoint">URL del endpoint XML</label>
+      <div class="settings-row">
+        <input id="endpoint" type="url" spellcheck="false" />
+        <input id="image-base-url" type="url" spellcheck="false" aria-label="Ubicación pública de imágenes" placeholder="http://servidor/library" />
+        <button id="save-button" type="button">Guardar y cargar</button>
+      </div>
+      <p>La URL XML y la ubicación pública de imágenes se guardan localmente.</p>
+    </section>
+
+    <main>
+      <div class="catalog-header">
+        <div>
+          <h2>Explorar catálogo</h2>
+          <p id="summary" aria-live="polite">Carga el catálogo para comenzar.</p>
+        </div>
+        <button id="reload-button" type="button">↻ Actualizar</button>
+      </div>
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+      <section id="book-grid" class="book-grid" aria-label="Libros"></section>
+      <nav id="pagination" class="pagination" aria-label="Paginación"></nav>
+    </main>
+    <template id="book-template">
+      <article class="book-card">
+        <div class="cover-wrap"><img class="cover" alt="" /><div class="fallback-cover">Libro</div></div>
+        <div class="book-content">
+          <p class="genre"></p><h3></h3><dl>
+            <div><dt>Autor(es)</dt><dd data-field="authors"></dd></div>
+            <div><dt>ISBN</dt><dd data-field="isbn"></dd></div>
+            <div><dt>Stock</dt><dd data-field="stock"></dd></div>
+            <div><dt>Publicación</dt><dd data-field="year"></dd></div>
+            <div><dt>Precio</dt><dd class="price" data-field="price"></dd></div>
+          </dl>
+        </div>
+      </article>
+    </template>
+    <script src="renderer.js"></script>
+  </body>
+</html>
