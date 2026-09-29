@@ -115,6 +115,29 @@ class PostgresRepository:
                 (when, session_id),
             )
 
+    def extend_session(self, session_id, new_expires_at):
+        """POST /session/extend: solo mueve expires_at hacia adelante; no toca revoked_at."""
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE login_sessions SET expires_at = %s WHERE session_id = %s AND revoked_at IS NULL",
+                (new_expires_at, session_id),
+            )
+
+    def update_profile(self, user_id, fields):
+        """PATCH /profile: actualiza solo las columnas presentes en `fields`
+        (dict ya validado por auth.py). Vuelve a traer la fila completa."""
+        if fields:
+            sets = ", ".join(f"{col} = %s" for col in fields)
+            query = f"UPDATE users SET {sets}, updated_at = CURRENT_TIMESTAMP WHERE user_id = %s"
+            try:
+                with self._connect() as conn:
+                    conn.execute(query, (*fields.values(), user_id))
+            except UniqueViolation:
+                raise EmailAlreadyExists(fields.get("email"))
+        with self._connect() as conn:
+            query = f"SELECT {USER_COLUMNS} FROM users WHERE user_id = %s"
+            return conn.execute(query, (user_id,)).fetchone()
+
     def ping(self):
         """Devuelve {'database': bool, 'schema': bool}; lanza si no hay conexión."""
         with self._connect() as conn:

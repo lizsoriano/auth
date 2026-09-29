@@ -25,7 +25,7 @@ services/login/
 │   ├── routes.py              # endpoints + errores XML/JSON
 │   ├── serializers/           # xml_serializer.py · json_serializer.py · negociación de ?format
 │   └── docs.py                # OpenAPI 3 + Swagger UI (ejemplos XML generados por el serializador)
-├── tests/                     # pytest: 91 unitarias + 4 de integración con PostgreSQL
+├── tests/                     # pytest: 92 unitarias + 4 de integración con PostgreSQL
 ├── postman/                   # colección con pruebas automáticas
 └── requirements.txt / requirements-dev.txt / .env.example
 ```
@@ -99,6 +99,7 @@ python3 -c "import secrets; print(secrets.token_hex(32))"   # pega el resultado 
 | `EMAIL_CONFIRMATION_REQUIRED` | `true` | `false` = sin correo: las cuentas nuevas entran directo (solo desarrollo). |
 | `MAIL_FROM` | — (obligatoria si lo anterior es `true`) | Remitente, p. ej. `Library <no-reply@tu-dominio.com>`. |
 | `PUBLIC_BASE_URL` | `http://localhost:5000` | Base del enlace del correo. Debe abrirse desde el navegador del usuario (IP/dominio público de la VM). |
+| `EMAIL_LINK_FORMAT` | `json` | Formato con el que abre el enlace del correo (`json`, `xml` o vacío = XML). Con `json`, al hacer clic se ve el JSON. |
 | `SMTP_HOST` / `SMTP_PORT` | `localhost` / `25` | Postfix local. Sin autenticación ni TLS (loopback). |
 | `SMTP_STARTTLS` / `SMTP_USERNAME` / `SMTP_PASSWORD` | `false` / vacío | Solo si se usa un SMTP remoto en vez de Postfix. |
 | `EMAIL_TOKEN_TTL_HOURS` | `24` | Vigencia del enlace de confirmación. |
@@ -119,7 +120,7 @@ Si Postfix está caído, `POST /register` igual crea la cuenta y responde `"veri
 
 ```bash
 # CentOS / RHEL
-sudo dnf install -y postfix cyrus-sasl-plain s-nail
+sudo dnf install -y postfix postfix-lmdb cyrus-sasl-plain s-nail
 sudo systemctl enable --now postfix.service
 systemctl status postfix.service --no-pager
 
@@ -143,13 +144,15 @@ ss -ltnp | grep ':25 '            # debe mostrar solo 127.0.0.1:25
 sudo postconf -e 'relayhost = [smtp.gmail.com]:587'
 sudo postconf -e 'smtp_sasl_auth_enable = yes'
 sudo postconf -e 'smtp_sasl_security_options = noanonymous'
-sudo postconf -e 'smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd'
+sudo postconf -e 'smtp_sasl_password_maps = lmdb:/etc/postfix/sasl_passwd'
 sudo postconf -e 'smtp_tls_security_level = encrypt'
 sudo postconf -e 'smtp_tls_CAfile = /etc/pki/tls/certs/ca-bundle.crt'
 echo '[smtp.gmail.com]:587 tu_cuenta@gmail.com:CONTRASENA_DE_APLICACION' | sudo tee /etc/postfix/sasl_passwd >/dev/null
-sudo chmod 600 /etc/postfix/sasl_passwd && sudo postmap /etc/postfix/sasl_passwd
+sudo chmod 600 /etc/postfix/sasl_passwd && sudo postmap lmdb:/etc/postfix/sasl_passwd
 sudo systemctl restart postfix.service
 ```
+
+> **CentOS Stream 10 / RHEL 10:** Postfix ya no trae Berkeley DB, así que `hash:` **no funciona** (`unsupported dictionary type: hash`): usa `lmdb:` y el paquete `postfix-lmdb`.
 
 Gmail reescribe el remitente a la cuenta autenticada: usa esa misma dirección en `MAIL_FROM`
 (y respeta su límite diario de envíos). Cualquier otro relay SMTP (SendGrid, Mailgun, SES…) se configura igual
@@ -175,6 +178,23 @@ PUBLIC_BASE_URL=http://IP-PUBLICA-DE-LA-VM:5000     # el enlace se abre desde el
 
 > Nota: el puerto 5000 debe ser alcanzable desde el navegador de quien recibe el correo (regla de firewall
 > restringida a las IP que necesites, o un dominio con proxy inverso). Si no, el enlace no abrirá.
+
+## 5b. Despliegue guiado en la VM (scripts en `deploy/`)
+
+Tres scripts automatizan lo anterior en una VM Linux con Postfix y PostgreSQL. Las contraseñas se **piden por teclado**
+(no se muestran, no se guardan en el repo ni en el historial):
+
+| Script | Qué hace |
+|---|---|
+| `deploy/setup_db_vm.sh` | Respaldo (`pg_dump`), migraciones `001`–`003`, compara los datos **antes y después**, crea el rol con contraseña aleatoria y la guarda solo en `.env` (600), y arranca `login.service`. |
+| `deploy/setup_gmail_relay_vm.sh` | Configura Postfix para entregar por Gmail 587 (`lmdb:`), actualiza `MAIL_FROM` y envía un correo de prueba. Pide tu Gmail y una contraseña de aplicación. |
+| `deploy/demo_json.sh correo@gmail.com [TOKEN]` | Ejecuta los `curl` (health, register, verify, login, session, logout) mostrando cada JSON formateado con `python3 -m json.tool`. |
+
+```bash
+bash /opt/auth/deploy/setup_db_vm.sh
+bash /opt/auth/deploy/setup_gmail_relay_vm.sh
+bash /opt/auth/deploy/demo_json.sh tu_correo@gmail.com
+```
 
 ## 6. Ejecución (puerto 5000)
 
@@ -341,7 +361,7 @@ CRUD del monolito ya cuentan como verificados y pueden iniciar sesión aquí (co
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                          # 91 unitarias (repositorio en memoria, reloj y correo simulados)
+pytest -q                          # 92 unitarias (repositorio en memoria, reloj y correo simulados)
 
 # Integración contra PostgreSQL (BD DESECHABLE, no la de producción):
 export TEST_DATABASE_URL='postgresql://login_service_user:CLAVE@localhost:5432/library_db'

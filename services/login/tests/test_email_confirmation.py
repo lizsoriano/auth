@@ -34,7 +34,22 @@ def test_register_sends_one_email_with_the_link(cm_client, mailer):
     assert "correo" in body["message"] and "POST /login" in body["message"]
     (mail,) = mailer.sent
     assert mail["to"] == "ana@gmail.com" and mail["nombre"] == "Ana" and mail["ttl_hours"] == 24
-    assert mail["link"].startswith("http://vm.example:5000/verify/") and len(mail["link"].rsplit("/", 1)[1]) >= 40
+    assert mail["link"].startswith("http://vm.example:5000/verify/") and mail["link"].endswith("?format=json")
+    assert len(mailer.last_token) >= 40                      # y el token no arrastra el ?format=
+
+
+def test_email_link_format_is_configurable(cm_settings, repo, clock, mailer):
+    from dataclasses import replace
+    from login_service import create_app
+    for fmt, suffix in (("xml", "?format=xml"), ("", "")):
+        mailer.sent.clear()
+        repo.users.clear()
+        app = create_app(replace(cm_settings, email_link_format=fmt), repository=repo, clock=clock, mailer=mailer)
+        app.test_client().post("/register?format=json", json=PERSON)
+        link = mailer.sent[-1]["link"]
+        assert link.endswith(suffix) and (("?" in link) == bool(suffix))
+    with pytest.raises(ConfigError, match="EMAIL_LINK_FORMAT"):
+        replace(cm_settings, email_link_format="html", database_url="postgresql://x").validate()
 
 
 def test_only_the_hash_of_the_token_is_stored(cm_client, repo, mailer):
@@ -219,7 +234,7 @@ def smtp(monkeypatch):
 
 
 def test_smtp_mailer_talks_plain_smtp_to_local_postfix(cm_settings, smtp):
-    SmtpMailer(cm_settings).send_verification("ana@gmail.com", "Ana", "http://vm.example:5000/verify/TOKEN", 24)
+    SmtpMailer(cm_settings).send_verification("ana@gmail.com", "Ana", "http://vm.example:5000/verify/TOKEN?format=json", 24)
     (conn,) = smtp.instances
     assert (conn.host, conn.port, conn.timeout) == ("localhost", 25, 10)
     assert conn.calls == ["ehlo"]                               # sin STARTTLS ni login contra Postfix local
@@ -229,9 +244,9 @@ def test_smtp_mailer_talks_plain_smtp_to_local_postfix(cm_settings, smtp):
     text = msg.get_body(preferencelist=("plain",)).get_content()
     page = msg.get_body(preferencelist=("html",)).get_content()
     assert msg.get_content_type() == "multipart/alternative"
-    assert "Da clic aquí para confirmar tu cuenta" in text and "http://vm.example:5000/verify/TOKEN" in text
-    assert "TOKEN" in text.split("token de confirmación es:")[1] and "Hola Ana" in text and "24 horas" in text
-    assert '<a href="http://vm.example:5000/verify/TOKEN"' in page and "Da clic aquí para confirmar tu cuenta</a>" in page
+    assert "Da clic aquí para confirmar tu cuenta" in text and "http://vm.example:5000/verify/TOKEN?format=json" in text
+    assert text.split("token de confirmación es:")[1].strip().startswith("TOKEN\n") and "Hola Ana" in text and "24 horas" in text
+    assert '<a href="http://vm.example:5000/verify/TOKEN?format=json"' in page and "Da clic aquí para confirmar tu cuenta</a>" in page
     assert "<code>TOKEN</code>" in page
 
 

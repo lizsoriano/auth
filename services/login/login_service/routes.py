@@ -113,6 +113,18 @@ def current_session():
     return render({"authenticated": True, "user": public_user(row), "session": service.session_info(row)})
 
 
+@api.post("/session/extend")
+def extend_session():
+    info = _service().extend_session(session.get("sid"))
+    return render({"message": "Sesión extendida", "session": info})
+
+
+@api.patch("/profile")
+def update_profile():
+    user = _service().update_profile(session.get("sid"), _body())
+    return render({"message": "Perfil actualizado correctamente.", "user": user})
+
+
 @api.get("/health")
 def health():
     try:

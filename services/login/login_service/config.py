@@ -48,6 +48,8 @@ class Settings:
     email_token_ttl_hours: int = 24
     resend_cooldown_seconds: int = 60
     public_base_url: str = "http://localhost:5000"  # base del enlace que recibe el usuario
+    # Formato con el que se abre el enlace del correo: "json" (se ve JSON en el navegador), "xml" o "" (el predeterminado, XML).
+    email_link_format: str = "json"
     smtp_host: str = "localhost"  # Postfix (postfix.service) escuchando en loopback
     smtp_port: int = 25
     smtp_starttls: bool = False
@@ -81,6 +83,7 @@ class Settings:
             email_token_ttl_hours=_int("EMAIL_TOKEN_TTL_HOURS", 24),
             resend_cooldown_seconds=_int("RESEND_COOLDOWN_SECONDS", 60),
             public_base_url=os.getenv("PUBLIC_BASE_URL", "http://localhost:5000").strip().rstrip("/"),
+            email_link_format=os.getenv("EMAIL_LINK_FORMAT", "json").strip().lower(),
             smtp_host=os.getenv("SMTP_HOST", "localhost").strip(),
             smtp_port=_int("SMTP_PORT", 25),
             smtp_starttls=_bool("SMTP_STARTTLS", False),
@@ -112,6 +115,8 @@ class Settings:
                                   "mientras EMAIL_CONFIRMATION_REQUIRED=true.")
             if not self.public_base_url.startswith(("http://", "https://")):
                 raise ConfigError("PUBLIC_BASE_URL debe empezar con http:// o https:// (es la base del enlace del correo).")
+            if self.email_link_format not in ("", "xml", "json"):
+                raise ConfigError("EMAIL_LINK_FORMAT debe ser json, xml o vacío.")
             if self.email_token_ttl_hours <= 0:
                 raise ConfigError("EMAIL_TOKEN_TTL_HOURS debe ser mayor que 0.")
         if self.cookie_samesite not in ("Lax", "Strict", "None"):

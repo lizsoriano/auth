@@ -29,7 +29,7 @@ class CaptureMailer:
 
     @property
     def token(self):
-        return self.sent[-1][1].rsplit("/", 1)[1]
+        return self.sent[-1][1].rsplit("/", 1)[1].split("?")[0]
 
 
 @pytest.fixture

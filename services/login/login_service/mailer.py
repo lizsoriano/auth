@@ -30,7 +30,7 @@ class SmtpMailer:
         msg["Date"] = formatdate(localtime=True)
         domain = parseaddr(self.s.mail_from)[1].rpartition("@")[2] or "localhost"
         msg["Message-ID"] = make_msgid(domain=domain)
-        token = link.rsplit("/", 1)[-1]  # el mismo token del enlace, visible para poder probar a mano
+        token = link.rsplit("/", 1)[-1].split("?")[0]  # el mismo token del enlace, visible para poder probar a mano
         msg.set_content(
             f"Hola {nombre},\n\n"
             "Da clic aquí para confirmar tu cuenta:\n\n"

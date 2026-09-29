@@ -111,7 +111,8 @@ class AuthService:
         return token, (self._hash_token(token), now, expires)
 
     def _send_verification(self, user_row, token):
-        link = f"{self.settings.public_base_url}/verify/{token}"
+        fmt = self.settings.email_link_format
+        link = f"{self.settings.public_base_url}/verify/{token}" + (f"?format={fmt}" if fmt else "")
         try:
             self.mailer.send_verification(user_row["email"], user_row["nombre"] or user_row["display_name"], link,
                                           self.settings.email_token_ttl_hours)
@@ -229,3 +230,76 @@ class AuthService:
         except ValueError:
             return
         self.repo.revoke_session(session_id, when)
+
+    def extend_session(self, session_id):
+        """POST /session/extend: renueva los 30 minutos desde ahora."""
+        state, row = self.resolve_session(session_id)
+        if state == "missing":
+            raise ApiError("not_authenticated", "No hay una sesión autenticada", 401)
+        if state == "expired":
+            raise ApiError("session_expired", "La sesión caducó (30 minutos). Inicia sesión de nuevo", 401)
+        now = self.clock()
+        new_expiry = now + timedelta(minutes=self.settings.session_timeout_minutes)
+        self.repo.extend_session(session_id, new_expiry)
+        return {"expires_at": new_expiry, "expires_in_seconds": self.settings.session_timeout_minutes * 60}
+
+    # ------------------------------------------------------------------ perfil
+    def update_profile(self, session_id, data):
+        """PATCH /profile: nombre/apellidos, email y/o password del usuario de
+        la sesión activa. Solo actualiza las columnas presentes en `data`."""
+        state, row = self.resolve_session(session_id)
+        if state == "missing":
+            raise ApiError("not_authenticated", "No hay una sesión autenticada", 401)
+        if state == "expired":
+            raise ApiError("session_expired", "La sesión caducó (30 minutos). Inicia sesión de nuevo", 401)
+
+        problems = []
+        updates = {}
+        nombres = {}
+        for key, label in NAME_FIELDS.items():
+            if key not in data:
+                continue
+            value = data.get(key)
+            if not isinstance(value, str) or not value.strip():
+                problems.append({"field": key, "message": f"El campo {label} no puede quedar vacío"})
+            elif len(value.strip()) > NAME_MAX:
+                problems.append({"field": key, "message": f"El campo {label} admite máximo {NAME_MAX} caracteres"})
+            else:
+                nombres[key] = " ".join(value.split())
+
+        if nombres:
+            updates.update(nombres)
+            nombre = nombres.get("nombre", row["nombre"] or "")
+            paterno = nombres.get("apellido_paterno", row["apellido_paterno"] or "")
+            materno = nombres.get("apellido_materno", row["apellido_materno"] or "")
+            updates["display_name"] = " ".join((nombre, paterno, materno)).strip()[:DISPLAY_NAME_MAX]
+
+        if "email" in data:
+            email = self._validate_email(data.get("email"), problems)
+            if email:
+                updates["email"] = email
+
+        if "password" in data:
+            password = data.get("password")
+            if not isinstance(password, str) or not password:
+                problems.append({"field": "password", "message": "El campo password no puede quedar vacío"})
+            elif len(password) < self.settings.min_password_length:
+                problems.append({"field": "password",
+                                 "message": f"La contraseña debe tener al menos {self.settings.min_password_length} caracteres"})
+            elif not passwords.fits(password):
+                problems.append({"field": "password",
+                                 "message": f"La contraseña admite máximo {passwords.BCRYPT_MAX_BYTES} bytes (límite de bcrypt)"})
+            else:
+                updates["password_hash"] = passwords.hash_password(password, self.settings.bcrypt_rounds)
+
+        if problems:
+            raise ApiError("validation_error", "Los datos enviados no son válidos", 400, problems)
+        if not updates:
+            raise ApiError("validation_error", "Envía al menos un campo para actualizar "
+                           "(nombre, apellido_paterno, apellido_materno, email, password)", 400)
+
+        try:
+            updated = self.repo.update_profile(row["user_id"], updates)
+        except EmailAlreadyExists:
+            raise ApiError("email_exists", "El correo ya está registrado", 409)
+        return public_user(updated)
