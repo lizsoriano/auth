@@ -58,12 +58,7 @@ echo "sincronizada en $SOAP_ENV"
 unset SECRET
 chmod 600 "$LOGIN_ENV" "$SOAP_ENV"
 
-say "3) Código: login (config.py, auth.py, repository.py, routes.py)"
-cp "$LOGIN_DIR/login_service/config.py"     "$LOGIN_DIR/login_service/config.py.bak.$(date +%s)" 2>/dev/null || true
-cp "$REPO/services/login/login_service/config.py"     "$LOGIN_DIR/login_service/config.py"
-cp "$REPO/services/login/login_service/auth.py"       "$LOGIN_DIR/login_service/auth.py"
-cp "$REPO/services/login/login_service/repository.py" "$LOGIN_DIR/login_service/repository.py"
-cp "$REPO/services/login/login_service/routes.py"     "$LOGIN_DIR/login_service/routes.py"
+say "3) Código: login (ya lo trae el git pull de \$REPO -- login.service corre directo de ahí; solo falta la dependencia)"
 "$LOGIN_DIR/.venv/bin/pip" install -q PyJWT==2.9.0
 "$LOGIN_DIR/.venv/bin/python" -m py_compile "$LOGIN_DIR/login_service/config.py" "$LOGIN_DIR/login_service/auth.py" \
   "$LOGIN_DIR/login_service/repository.py" "$LOGIN_DIR/login_service/routes.py"
