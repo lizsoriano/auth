@@ -41,7 +41,8 @@ def mailer():
 def pg_client(mailer):
     from login_service import Settings, create_app
     settings = Settings(secret_key="integration-secret-0123456789", database_url=DSN, bcrypt_rounds=4,
-                        mail_from="Library <no-reply@example.com>", email_confirmation_required=True)
+                        mail_from="Library <no-reply@example.com>", email_confirmation_required=True,
+                        jwt_secret="test-jwt-secret-0123456789")
     return create_app(settings, mailer=mailer).test_client()
 
 

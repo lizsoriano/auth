@@ -14,3 +14,13 @@ class ClasificacionDuplicadaError(Exception):
     """Ya existe una fila en clasificaciones_cloud para ese
     (clasificador_id, book_id, concept_id) — violación de
     uq_clasificaciones_sin_duplicado."""
+
+
+class LibroInvalidoError(Exception):
+    """Datos de books.* que violan una restricción (isbn con formato
+    inválido, precio negativo, título vacío, año fuera de rango, ISBN
+    duplicado...) — ver sql/crud_libros_extension.sql y data/schema.sql."""
+
+
+class LibroNoEncontradoError(Exception):
+    """No existe ningún libro con ese isbn (actualizar/eliminar)."""

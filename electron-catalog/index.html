@@ -7,36 +7,152 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">BIBLIOTECA DIGITAL</p>
-        <h1>Catálogo de libros</h1>
-      </div>
-      <button id="settings-button" class="secondary" type="button" aria-expanded="false">Configuración</button>
-    </header>
+    <!-- ==================== LOGIN (primera pantalla) ==================== -->
+    <section id="login-screen" class="login-screen">
+      <form id="login-form" class="login-card">
+        <h1>Iniciar sesión</h1>
+        <p class="login-subtitle">Biblioteca digital</p>
+        <label for="login-email">Email</label>
+        <input id="login-email" type="email" autocomplete="username" required />
+        <label for="login-password">Password</label>
+        <input id="login-password" type="password" autocomplete="current-password" required />
+        <button id="login-submit" type="submit">Entrar</button>
+        <p id="login-error" class="form-error" role="alert" aria-live="assertive"></p>
+        <button id="show-register" type="button" class="link-button">Registrarse</button>
+      </form>
 
-    <section id="settings" class="settings" hidden>
-      <label for="endpoint">URL del endpoint XML</label>
-      <div class="settings-row">
-        <input id="endpoint" type="url" spellcheck="false" />
-        <input id="image-base-url" type="url" spellcheck="false" aria-label="Ubicación pública de imágenes" placeholder="http://servidor/library" />
-        <button id="save-button" type="button">Guardar y cargar</button>
-      </div>
-      <p>La URL XML y la ubicación pública de imágenes se guardan localmente.</p>
+      <form id="register-form" class="login-card" hidden>
+        <h1>Registrarse</h1>
+        <label for="reg-nombre">Nombre</label>
+        <input id="reg-nombre" required />
+        <label for="reg-apellido-paterno">Apellido paterno</label>
+        <input id="reg-apellido-paterno" required />
+        <label for="reg-apellido-materno">Apellido materno</label>
+        <input id="reg-apellido-materno" required />
+        <label for="reg-email">Email</label>
+        <input id="reg-email" type="email" required />
+        <label for="reg-password">Password</label>
+        <input id="reg-password" type="password" minlength="8" required />
+        <button id="register-submit" type="submit">Crear cuenta</button>
+        <p id="register-error" class="form-error" role="alert" aria-live="assertive"></p>
+        <p id="register-ok" class="form-ok" role="status"></p>
+        <button id="show-login" type="button" class="link-button">Ya tengo cuenta</button>
+      </form>
+
+      <details class="login-settings">
+        <summary>URLs de los microservicios</summary>
+        <label for="auth-url">AUTH_URL (login, puerto 5000)</label>
+        <input id="auth-url" type="url" spellcheck="false" />
+        <label for="books-url">BOOKS_URL (books, puerto 5001)</label>
+        <input id="books-url" type="url" spellcheck="false" />
+        <label for="image-base-url">Base de imágenes (monolito, /library)</label>
+        <input id="image-base-url" type="url" spellcheck="false" />
+        <button id="save-urls" type="button">Guardar</button>
+        <p class="hint">Se guardan localmente en esta computadora.</p>
+      </details>
     </section>
 
-    <main>
-      <div class="catalog-header">
+    <!-- ==================== APP (tras iniciar sesión) ==================== -->
+    <div id="app-screen" hidden>
+      <header class="topbar">
         <div>
-          <h2>Explorar catálogo</h2>
-          <p id="summary" aria-live="polite">Carga el catálogo para comenzar.</p>
+          <p class="eyebrow">BIBLIOTECA DIGITAL</p>
+          <h1>Catálogo de libros</h1>
         </div>
-        <button id="reload-button" type="button">↻ Actualizar</button>
-      </div>
-      <div id="status" class="status" role="status" aria-live="polite"></div>
-      <section id="book-grid" class="book-grid" aria-label="Libros"></section>
-      <nav id="pagination" class="pagination" aria-label="Paginación"></nav>
-    </main>
+        <nav class="tabs">
+          <button id="tab-catalog" class="tab active" type="button">Catálogo</button>
+          <button id="tab-status" class="tab" type="button">Estado de servicios</button>
+        </nav>
+        <div class="topbar-actions">
+          <span id="session-user" class="session-user"></span>
+          <button id="logout-button" class="secondary" type="button">Cerrar sesión</button>
+        </div>
+      </header>
+
+      <!-- ---- vista 1: catálogo (primera vista tras el login) ---- -->
+      <main id="catalog-view">
+        <div class="catalog-header">
+          <div>
+            <h2>Explorar catálogo</h2>
+            <p id="summary" aria-live="polite">Carga el catálogo para comenzar.</p>
+          </div>
+          <div class="catalog-actions">
+            <button id="add-button" type="button">+ Agregar</button>
+            <button id="reload-button" type="button">↻ Actualizar</button>
+          </div>
+        </div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+        <section id="book-grid" class="book-grid" aria-label="Libros"></section>
+        <nav id="pagination" class="pagination" aria-label="Paginación"></nav>
+      </main>
+
+      <!-- ---- vista 2: semáforo de estado de los microservicios ---- -->
+      <main id="status-view" hidden>
+        <h2>Estado de servicios</h2>
+        <p class="hint">Se comprueba cada 10 segundos.</p>
+        <div class="semaforo-grid">
+          <article class="semaforo-card">
+            <span id="auth-dot" class="dot dot-unknown"></span>
+            <div>
+              <h3>AUTH / LOGIN</h3>
+              <p id="auth-status-text">Comprobando…</p>
+              <p class="semaforo-url" id="auth-status-url"></p>
+            </div>
+          </article>
+          <article class="semaforo-card">
+            <span id="books-dot" class="dot dot-unknown"></span>
+            <div>
+              <h3>BOOKS</h3>
+              <p id="books-status-text">Comprobando…</p>
+              <p class="semaforo-url" id="books-status-url"></p>
+            </div>
+          </article>
+        </div>
+      </main>
+    </div>
+
+    <!-- ==================== modal: alta / edición de libro ==================== -->
+    <div id="book-modal" class="modal-backdrop" hidden>
+      <form id="book-form" class="modal-card">
+        <h2 id="book-modal-title">Agregar libro</h2>
+        <label for="book-isbn">ISBN</label>
+        <input id="book-isbn" required />
+        <label for="book-title">Título</label>
+        <input id="book-title" required />
+        <div class="modal-row">
+          <div>
+            <label for="book-year">Año de publicación</label>
+            <input id="book-year" type="number" min="1000" max="9999" required />
+          </div>
+          <div>
+            <label for="book-price">Precio</label>
+            <input id="book-price" type="number" min="0" step="0.01" required />
+          </div>
+          <div>
+            <label for="book-stock">Stock</label>
+            <input id="book-stock" type="number" min="0" step="1" required />
+          </div>
+        </div>
+        <div class="modal-row">
+          <div>
+            <label for="book-category">Categoría</label>
+            <input id="book-category" required />
+          </div>
+          <div>
+            <label for="book-format">Formato</label>
+            <input id="book-format" required />
+          </div>
+        </div>
+        <label for="book-authors">Autor(es), separados por coma</label>
+        <input id="book-authors" placeholder="George Orwell, Aldous Huxley" />
+        <p id="book-form-error" class="form-error" role="alert" aria-live="assertive"></p>
+        <div class="modal-actions">
+          <button type="button" id="book-cancel" class="secondary">Cancelar</button>
+          <button type="submit" id="book-save">Guardar</button>
+        </div>
+      </form>
+    </div>
+
     <template id="book-template">
       <article class="book-card">
         <div class="cover-wrap"><img class="cover" alt="" /><div class="fallback-cover">Libro</div></div>
@@ -48,6 +164,10 @@
             <div><dt>Publicación</dt><dd data-field="year"></dd></div>
             <div><dt>Precio</dt><dd class="price" data-field="price"></dd></div>
           </dl>
+          <div class="card-actions">
+            <button type="button" class="secondary edit-button">Editar</button>
+            <button type="button" class="danger delete-button">Eliminar</button>
+          </div>
         </div>
       </article>
     </template>

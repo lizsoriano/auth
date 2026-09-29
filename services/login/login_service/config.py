@@ -59,6 +59,9 @@ class Settings:
     mail_from: str = ""
     log_level: str = "INFO"
     debug: bool = False
+    # --- JWT (emitido en POST /login; el microservicio books lo valida con la misma clave) ---
+    jwt_secret: str = ""
+    jwt_expiration_hours: int = 2
 
     @classmethod
     def from_env(cls):
@@ -93,6 +96,8 @@ class Settings:
             mail_from=os.getenv("MAIL_FROM", "").strip(),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             debug=_bool("FLASK_DEBUG", False),
+            jwt_secret=os.getenv("JWT_SECRET", ""),
+            jwt_expiration_hours=_int("JWT_EXPIRATION_HOURS", 2),
         )
 
     def validate(self, needs_database=True):
@@ -109,6 +114,14 @@ class Settings:
             raise ConfigError("SESSION_COOKIE_LIFETIME_HOURS no puede ser menor que la duración de la sesión.")
         if not 4 <= self.bcrypt_rounds <= 15:
             raise ConfigError("BCRYPT_ROUNDS debe estar entre 4 y 15.")
+        if len(self.jwt_secret) < 16:
+            raise ConfigError(
+                "JWT_SECRET falta o es demasiado corta (mínimo 16 caracteres). "
+                "Genera una con: python -c \"import secrets; print(secrets.token_hex(32))\" "
+                "-- debe ser LA MISMA en services/login y services/soap."
+            )
+        if self.jwt_expiration_hours <= 0:
+            raise ConfigError("JWT_EXPIRATION_HOURS debe ser mayor que 0.")
         if self.email_confirmation_required:
             if not self.mail_from or "@" not in self.mail_from:
                 raise ConfigError("MAIL_FROM es obligatorio (p. ej. 'Library <no-reply@tu-dominio>') "

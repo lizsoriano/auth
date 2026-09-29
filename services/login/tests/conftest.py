@@ -35,7 +35,7 @@ class MemoryRepository:
             raise EmailAlreadyExists(email)
         row = dict(user_id=len(self.users) + 1, nombre=nombre, apellido_paterno=apellido_paterno,
                    apellido_materno=apellido_materno, display_name=display_name, email=email,
-                   password_hash=password_hash, is_active=True, email_verified_at=email_verified_at,
+                   password_hash=password_hash, is_active=True, is_admin=False, email_verified_at=email_verified_at,
                    created_at=datetime(2026, 9, 18, tzinfo=timezone.utc))
         self.users[email] = row
         if verification:
@@ -126,7 +126,7 @@ def mailer():
 def app(repo, clock, mailer):
     """Sesión/registro sin confirmación de correo (la confirmación se prueba en test_email_confirmation.py)."""
     settings = Settings(secret_key="test-secret-key-0123456789", session_timeout_minutes=30, bcrypt_rounds=4,
-                        email_confirmation_required=False)
+                        email_confirmation_required=False, jwt_secret="test-jwt-secret-0123456789")
     return create_app(settings, repository=repo, clock=clock, mailer=mailer)
 
 
@@ -134,7 +134,8 @@ def app(repo, clock, mailer):
 def cm_settings():
     return Settings(secret_key="test-secret-key-0123456789", session_timeout_minutes=30, bcrypt_rounds=4,
                     email_confirmation_required=True, mail_from="Library <no-reply@example.com>",
-                    public_base_url="http://vm.example:5000", email_token_ttl_hours=24, resend_cooldown_seconds=60)
+                    public_base_url="http://vm.example:5000", email_token_ttl_hours=24, resend_cooldown_seconds=60,
+                    jwt_secret="test-jwt-secret-0123456789")
 
 
 @pytest.fixture

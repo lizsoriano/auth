@@ -19,7 +19,9 @@ import xml.etree.ElementTree as ET
 
 from flask import jsonify, request
 
+from auth_jwt import token_required
 from db import connection, repository
+from db.errors import LibroInvalidoError, LibroNoEncontradoError
 
 
 def quiere_json():
@@ -32,6 +34,52 @@ def quiere_json():
 def _xml_response(root_el):
     body = b'<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root_el, encoding="utf-8")
     return body, {"Content-Type": "application/xml"}
+
+
+def _error(mensaje, status):
+    if quiere_json():
+        return jsonify({"error": mensaje}), status
+    root = ET.Element("error")
+    ET.SubElement(root, "message").text = mensaje
+    body, headers = _xml_response(root)
+    return body, status, headers
+
+
+def _cuerpo():
+    """Cuerpo de POST/PUT: JSON (Content-Type: application/json) o
+    formulario -- lo que sea más cómodo para probar con curl/Postman o
+    para la app de escritorio (Electron/Tkinter)."""
+    if request.is_json:
+        data = request.get_json(silent=True)
+        return data if isinstance(data, dict) else {}
+    return request.form.to_dict()
+
+
+_CAMPOS_LIBRO = ("isbn", "title", "publicationYear", "price", "stock", "category", "format", "authors")
+
+
+def _datos_libro(data, requiere_isbn):
+    """Valida presencia/tipo de los campos del formulario de alta/edición.
+    Devuelve (kwargs_para_repository, None) o (None, mensaje_de_error)."""
+    faltantes = [c for c in _CAMPOS_LIBRO if c != "authors" and not str(data.get(c, "")).strip()
+                and not (c == "isbn" and not requiere_isbn)]
+    if faltantes:
+        return None, f"Faltan campos obligatorios: {', '.join(faltantes)}"
+    try:
+        publication_year = int(data["publicationYear"])
+        price = float(data["price"])
+        stock = int(data.get("stock", 0) or 0)
+    except (TypeError, ValueError):
+        return None, "publicationYear, price y stock deben ser numéricos"
+    return {
+        "title": str(data["title"]).strip(),
+        "publication_year": publication_year,
+        "price": price,
+        "stock": stock,
+        "category": str(data["category"]).strip(),
+        "format": str(data["format"]).strip(),
+        "authors": str(data.get("authors", "")).strip(),
+    }, None
 
 
 def _libro_a_dict(libro):
@@ -157,9 +205,147 @@ def listar_libros_con_imagenes_view():
     return _xml_response(root)
 
 
+# --------------------------------------------------------------------
+# CRUD del catálogo -- "un usuario registrado puede hacer las operaciones
+# CRUD" (ver sql/crud_libros_extension.sql). Las 4 escrituras de abajo
+# exigen el JWT que emite POST /login del microservicio de autenticación
+# (ver auth_jwt.py); las lecturas (GET) siguen públicas, sin cambios.
+# --------------------------------------------------------------------
+
+@token_required
+def crear_libro_view():
+    data = _cuerpo()
+    if not str(data.get("isbn", "")).strip():
+        return _error("El campo isbn es obligatorio", 400)
+    campos, mensaje = _datos_libro(data, requiere_isbn=True)
+    if mensaje:
+        return _error(mensaje, 400)
+    try:
+        with connection.get_connection() as conn:
+            book_id = repository.crear_libro(conn, isbn=str(data["isbn"]).strip(), **campos)
+    except LibroInvalidoError as exc:
+        return _error(str(exc), 409 if "ya existe" in str(exc).lower() else 400)
+
+    payload = {"bookId": book_id, "isbn": str(data["isbn"]).strip(), **campos}
+    if quiere_json():
+        return jsonify(payload), 201
+    root = ET.Element("book")
+    ET.SubElement(root, "bookId").text = str(book_id)
+    ET.SubElement(root, "isbn").text = payload["isbn"]
+    ET.SubElement(root, "title").text = payload["title"]
+    body, headers = _xml_response(root)
+    return body, 201, headers
+
+
+@token_required
+def actualizar_libro_view(isbn):
+    data = _cuerpo()
+    campos, mensaje = _datos_libro(data, requiere_isbn=False)
+    if mensaje:
+        return _error(mensaje, 400)
+    try:
+        with connection.get_connection() as conn:
+            repository.actualizar_libro(conn, isbn=isbn, **campos)
+    except LibroNoEncontradoError as exc:
+        return _error(str(exc), 404)
+    except LibroInvalidoError as exc:
+        return _error(str(exc), 400)
+    return respond_message_ok(f"Libro {isbn} actualizado correctamente.")
+
+
+@token_required
+def parchear_libro_view(isbn):
+    """PATCH /books/<isbn>: a diferencia de PUT (que exige mandar TODOS los
+    campos y reemplaza el libro completo), aquí solo se envían los campos
+    que cambian -- lo que NO se manda viaja como NULL y fn_actualizar_libro
+    conserva el valor que el libro ya tenía (ver sql/crud_libros_extension.sql)."""
+    data = _cuerpo()
+    if not data:
+        return _error("Envía al menos un campo para modificar (PATCH no reemplaza el libro completo)", 400)
+
+    def numero(nombre, castear):
+        if nombre not in data:
+            return None, None
+        try:
+            return castear(data[nombre]), None
+        except (TypeError, ValueError):
+            return None, f"{nombre} debe ser numérico"
+
+    publication_year, err1 = numero("publicationYear", int)
+    price, err2 = numero("price", float)
+    stock, err3 = numero("stock", int)
+    error = err1 or err2 or err3
+    if error:
+        return _error(error, 400)
+
+    campos = {
+        "title": str(data["title"]).strip() if "title" in data else None,
+        "publication_year": publication_year,
+        "price": price,
+        "stock": stock,
+        "category": str(data["category"]).strip() if "category" in data else None,
+        "format": str(data["format"]).strip() if "format" in data else None,
+        "authors": str(data["authors"]).strip() if "authors" in data else None,
+    }
+    try:
+        with connection.get_connection() as conn:
+            repository.actualizar_libro(conn, isbn=isbn, **campos)
+    except LibroNoEncontradoError as exc:
+        return _error(str(exc), 404)
+    except LibroInvalidoError as exc:
+        return _error(str(exc), 400)
+    return respond_message_ok(f"Libro {isbn} modificado (parcial) correctamente.")
+
+
+@token_required
+def eliminar_libro_view(isbn):
+    try:
+        with connection.get_connection() as conn:
+            repository.eliminar_libro(conn, isbn)
+    except LibroNoEncontradoError as exc:
+        return _error(str(exc), 404)
+    return respond_message_ok(f"Libro {isbn} eliminado correctamente.")
+
+
+def respond_message_ok(mensaje):
+    if quiere_json():
+        return jsonify({"message": mensaje})
+    root = ET.Element("response")
+    ET.SubElement(root, "message").text = mensaje
+    return _xml_response(root)
+
+
+# --------------------------------------------------------------------
+# GET /health -- estado del microservicio y de PostgreSQL (mismo criterio
+# que services/login/login_service/routes.py: no revela detalles internos
+# del error, solo si la base responde).
+# --------------------------------------------------------------------
+
+def health_view():
+    try:
+        with connection.get_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+            conn.commit()
+    except Exception:
+        return _error("El servicio está activo pero PostgreSQL no está disponible", 503)
+    payload = {"status": "ok", "service": "soap", "database": "connected"}
+    if quiere_json():
+        return jsonify(payload)
+    root = ET.Element("response")
+    for k, v in payload.items():
+        ET.SubElement(root, k).text = v
+    return _xml_response(root)
+
+
 def register(app):
-    """Registra las 4 rutas en la app Flask existente (app.py)."""
+    """Registra las rutas REST en la app Flask existente (app.py)."""
     app.add_url_rule("/books", "listar_libros", listar_libros_view, methods=["GET"])
+    app.add_url_rule("/books", "crear_libro", crear_libro_view, methods=["POST"])
     app.add_url_rule("/books/images", "listar_libros_con_imagenes", listar_libros_con_imagenes_view, methods=["GET"])
     app.add_url_rule("/books/<isbn>", "obtener_libro", obtener_libro_view, methods=["GET"])
+    app.add_url_rule("/books/<isbn>", "actualizar_libro", actualizar_libro_view, methods=["PUT"])
+    app.add_url_rule("/books/<isbn>", "parchear_libro", parchear_libro_view, methods=["PATCH"])
+    app.add_url_rule("/books/<isbn>", "eliminar_libro", eliminar_libro_view, methods=["DELETE"])
     app.add_url_rule("/concepts", "listar_conceptos", listar_conceptos_view, methods=["GET"])
+    app.add_url_rule("/health", "health", health_view, methods=["GET"])

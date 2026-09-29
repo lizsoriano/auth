@@ -36,6 +36,40 @@ seed real de 30 libros), las 4 rutas exactas pedidas más las 2
 adicionales, en ambos formatos, incluyendo el caso 404. `GET /wsdl` y
 `POST /soap` se re-verificaron sin cambios de comportamiento.
 
+## Autenticación JWT para escrituras (CRUD de `/books`)
+
+`POST/PUT/PATCH/DELETE /books` (altas, reemplazos, modificaciones
+parciales y bajas del catálogo) exigen un JWT válido; `GET /books`,
+`GET /books/<isbn>`, `GET /books/images`, `GET /concepts` y `GET /health`
+siguen siendo públicos, sin cambios.
+
+El JWT lo emite `services/login` en `POST /login` (ver su README) — el
+cliente lo reenvía aquí como:
+
+```
+Authorization: Bearer <token>
+```
+
+Validación (`auth_jwt.py`, decorador `@token_required`, aplicado solo a
+las 4 vistas de escritura de `rest_api.py`): cabecera `Authorization`
+presente, esquema `Bearer`, token no vacío, firma HS256 válida contra
+`JWT_SECRET`, y no expirado. Cualquier caso que falle responde `401` sin
+llegar a ejecutar la operación:
+
+| Caso | Respuesta |
+|---|---|
+| Sin cabecera `Authorization` | 401 |
+| Cabecera sin el esquema `Bearer <token>` | 401 |
+| Firma inválida (token alterado o de otra clave) | 401 |
+| Token expirado | 401 |
+| Algoritmo distinto de HS256 | 401 |
+| `JWT_SECRET` no configurada en el servicio (falla cerrado) | 401 |
+
+`JWT_SECRET` (variable de entorno, ver `.env.example`) **debe ser
+idéntica** a la de `services/login` — es un secreto compartido entre
+ambos microservicios, nunca se guarda en la base de datos ni en el
+repositorio.
+
 ---
 
 Módulo SOAP de clasificación Cloud del catálogo de la librería. Se integra

@@ -32,6 +32,14 @@ SSH: `gcloud compute ssh maquina-02 ... -- -L 5050:localhost:5000`).
 
 ## Otros scripts
 
+- **`deploy_jwt.sh`** — despliega la autenticación JWT: aplica
+  `../data/migrations/005_login_jwt_role_grant.sql`, genera/sincroniza una
+  única `JWT_SECRET` en el `.env` de `login` y de `soap` (debe ser idéntica
+  en ambos), copia el código actualizado de los dos servicios, reinicia
+  `login.service`/`soap.service` y verifica con `curl` que las escrituras
+  de `/books` quedan protegidas. Pide la contraseña de `library_user` solo
+  para el permiso nuevo (`SELECT is_admin`). Ejecutar en la VM:
+  `bash /opt/auth/deploy/deploy_jwt.sh`.
 - **`demo_json.sh correo@gmail.com [TOKEN]`** — corre `curl` (health, registro, verificación, login, sesión,
   logout) mostrando cada JSON formateado. Pensado para ver el flujo completo en la terminal.
 - **`evidencias_vm.sh 1|2|3|4|5 [correo]`** — comandos de evidencia para la entrega/documentación (formatos

@@ -242,7 +242,7 @@ Los cuerpos `POST` se envían como JSON (UTF-8).
 | POST | `/register` | Registra al usuario y envía el correo de confirmación | 201 · 400 · 409 |
 | GET | `/verify/<token>` | Confirma el correo (es el enlace del mensaje) | 200 · 404 · 410 |
 | POST | `/resend-verification` | Reenvía el enlace (máx. uno por minuto) | 202 · 400 |
-| POST | `/login` | Verifica credenciales e inicia sesión (30 min) | 200 · 400 · 401 · 403 |
+| POST | `/login` | Verifica credenciales, inicia sesión (30 min) y emite un JWT | 200 · 400 · 401 · 403 |
 | POST | `/logout` | Revoca la sesión | 200 · 401 |
 | GET | `/session` | Usuario autenticado y tiempo restante | 200 · 401 |
 | GET | `/health` | Servicio + PostgreSQL + esquema | 200 · 503 |
@@ -251,6 +251,28 @@ Los cuerpos `POST` se envían como JSON (UTF-8).
 **Registro** pide `nombre`, `apellido_paterno`, `apellido_materno`, `email`, `password` (≥ 8 caracteres,
 ≤ 72 bytes por el límite de bcrypt). El correo se valida (formato) antes de registrar y es único sin
 distinguir mayúsculas. La cuenta nueva nunca es administradora.
+
+### Autenticación JWT (para el microservicio books)
+
+Además de la cookie de sesión (que sigue controlando `/session`, `/logout`, `/profile`, etc.),
+`POST /login` devuelve un **JWT** en el campo `token`:
+
+```json
+{ "message": "Sesión iniciada", "user": {...}, "session": {...},
+  "token": "eyJhbGciOiJIUzI1NiIs..." }
+```
+
+El cliente debe reenviar ese token como `Authorization: Bearer <token>` al llamar a las
+operaciones de escritura de `services/soap` (`POST`/`PUT`/`PATCH`/`DELETE /books`), que lo
+validan — ver [`../soap/README.md`](../soap/README.md#autenticación-jwt-para-escrituras). Las
+lecturas del catálogo (`GET /books`) no lo necesitan.
+
+- **Firma:** HS256, con `JWT_SECRET` (variable de entorno; **debe ser idéntica** en `services/login`
+  y `services/soap` — es un secreto compartido, no se guarda en la base de datos).
+- **Contenido:** `sub` (id del usuario), `role` (`"admin"` o `"user"`, según `users.is_admin`),
+  `iat`, `exp` (vigencia: `JWT_EXPIRATION_HOURS`, 2 horas por defecto — independiente de los 30
+  minutos de la sesión por cookie).
+- **Credenciales incorrectas:** `401`, sin `token` en la respuesta.
 
 ### Flujo de confirmación
 

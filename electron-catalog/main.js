@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, net } = require("electron");
+const { app, BrowserWindow, ipcMain, net, session } = require("electron");
 const path = require("node:path");
 
 function createWindow() {
@@ -20,16 +20,20 @@ function createWindow() {
   window.loadFile("index.html");
 }
 
+function validarHttpUrl(value, mensaje) {
+  let url;
+  try {
+    url = new URL(value);
+    if (!/^https?:$/.test(url.protocol)) throw new Error();
+  } catch {
+    throw new Error(mensaje);
+  }
+  return url;
+}
+
 app.whenReady().then(() => {
   ipcMain.handle("catalog:load-xml", async (_event, endpoint) => {
-    let url;
-    try {
-      url = new URL(endpoint);
-      if (!/^https?:$/.test(url.protocol)) throw new Error();
-    } catch {
-      throw new Error("La URL debe usar HTTP o HTTPS.");
-    }
-
+    const url = validarHttpUrl(endpoint, "La URL debe usar HTTP o HTTPS.");
     const response = await net.fetch(url.toString(), {
       headers: { Accept: "application/xml, text/xml;q=0.9" }
     });
@@ -45,14 +49,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("catalog:load-image", async (_event, imageUrl) => {
-    let url;
-    try {
-      url = new URL(imageUrl);
-      if (!/^https?:$/.test(url.protocol)) throw new Error();
-    } catch {
-      throw new Error("La URL de imagen debe usar HTTP o HTTPS.");
-    }
-
+    const url = validarHttpUrl(imageUrl, "La URL de imagen debe usar HTTP o HTTPS.");
     // Se descarga aquí (proceso principal) en vez de en el <img> del
     // renderer porque el servidor manda Cross-Origin-Resource-Policy:
     // same-origin -- Chromium bloquea esa carga cuando el origen de la
@@ -64,6 +61,54 @@ app.whenReady().then(() => {
     const contentType = response.headers.get("content-type") || "image/jpeg";
     const buffer = Buffer.from(await response.arrayBuffer());
     return `data:${contentType};base64,${buffer.toString("base64")}`;
+  });
+
+  // Canal genérico JSON para /auth (login/registro/sesión) y las rutas
+  // CRUD de /soap (books). net.fetch corre en el proceso principal, así
+  // que no choca con Cross-Origin-Resource-Policy ni con contextIsolation
+  // del renderer (mismo motivo que catalog:load-xml/-image de arriba).
+  // La cookie de sesión de /auth/login se guarda en la sesión persistente
+  // de Electron (session.defaultSession) y net.fetch la reenvía sola en
+  // las siguientes peticiones al mismo origen -- por eso no se maneja
+  // "a mano" en el renderer.
+  ipcMain.handle("api:request", async (_event, { method, url: rawUrl, body, headers }) => {
+    const url = validarHttpUrl(rawUrl, "La URL debe usar HTTP o HTTPS.");
+    const init = { method: method || "GET", headers: { Accept: "application/json", ...(headers || {}) } };
+    if (body !== undefined && body !== null) {
+      init.headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(body);
+    }
+    let response;
+    try {
+      response = await net.fetch(url.toString(), init);
+    } catch (error) {
+      return { ok: false, status: 0, error: "No se pudo conectar con el servidor." };
+    }
+    const text = await response.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = { message: text };
+    }
+    return { ok: response.ok, status: response.status, data };
+  });
+
+  // Semáforo: solo interesa si el servicio responde, no su contenido --
+  // por eso es un canal aparte y más simple que api:request (sin parsear
+  // JSON ni fallar por CORS/Content-Type).
+  ipcMain.handle("api:ping", async (_event, rawUrl) => {
+    try {
+      const url = validarHttpUrl(rawUrl, "URL inválida");
+      const response = await net.fetch(url.toString(), { method: "GET" });
+      return { up: response.ok, status: response.status };
+    } catch {
+      return { up: false, status: 0 };
+    }
+  });
+
+  ipcMain.handle("api:clear-session", async () => {
+    await session.defaultSession.clearStorageData({ storages: ["cookies"] });
   });
 
   createWindow();

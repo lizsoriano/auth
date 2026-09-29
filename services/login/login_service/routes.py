@@ -76,7 +76,7 @@ def resend_verification():
 @api.post("/login")
 def login():
     service = _service()
-    user, session_id, expires_at = service.login(
+    user, session_id, expires_at, token = service.login(
         _body(),
         previous_session_id=session.get("sid"),
         ip_address=request.remote_addr,
@@ -86,7 +86,9 @@ def login():
     session.permanent = True
     session["sid"] = str(session_id)
     info = {"expires_at": expires_at, "expires_in_seconds": service.settings.session_timeout_minutes * 60}
-    return render({"message": "Sesión iniciada", "user": user, "session": info})
+    # "token": el JWT que el cliente debe reenviar como "Authorization: Bearer <token>"
+    # al microservicio books en sus operaciones de escritura (POST/PUT/PATCH/DELETE).
+    return render({"message": "Sesión iniciada", "user": user, "session": info, "token": token})
 
 
 @api.post("/logout")
@@ -111,6 +113,18 @@ def current_session():
     if state == "expired":
         raise _session_expired()
     return render({"authenticated": True, "user": public_user(row), "session": service.session_info(row)})
+
+
+@api.post("/session/extend")
+def extend_session():
+    info = _service().extend_session(session.get("sid"))
+    return render({"message": "Sesión extendida", "session": info})
+
+
+@api.patch("/profile")
+def update_profile():
+    user = _service().update_profile(session.get("sid"), _body())
+    return render({"message": "Perfil actualizado correctamente.", "user": user})
 
 
 @api.get("/health")

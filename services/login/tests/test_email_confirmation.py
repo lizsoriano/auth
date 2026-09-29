@@ -278,8 +278,12 @@ def test_smtp_mailer_rejects_header_injection(cm_settings, smtp):
 
 # ----------------------------------------------------------------- config
 def test_config_requires_mail_from_when_confirmation_is_on():
+    jwt_secret = "test-jwt-secret-0123456789"
     with pytest.raises(ConfigError, match="MAIL_FROM"):
-        Settings(secret_key="x" * 20, database_url="postgresql://x", email_confirmation_required=True).validate()
-    Settings(secret_key="x" * 20, database_url="postgresql://x", email_confirmation_required=False).validate()
+        Settings(secret_key="x" * 20, database_url="postgresql://x", email_confirmation_required=True,
+                jwt_secret=jwt_secret).validate()
+    Settings(secret_key="x" * 20, database_url="postgresql://x", email_confirmation_required=False,
+            jwt_secret=jwt_secret).validate()
     with pytest.raises(ConfigError, match="PUBLIC_BASE_URL"):
-        Settings(secret_key="x" * 20, database_url="postgresql://x", mail_from="a@b.co", public_base_url="vm:5000").validate()
+        Settings(secret_key="x" * 20, database_url="postgresql://x", mail_from="a@b.co", public_base_url="vm:5000",
+                jwt_secret=jwt_secret).validate()

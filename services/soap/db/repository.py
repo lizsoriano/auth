@@ -20,7 +20,12 @@ import logging
 import psycopg2
 from psycopg2 import errors as pg_errors
 
-from db.errors import ClasificacionDuplicadaError, ConceptoInexistenteError
+from db.errors import (
+    ClasificacionDuplicadaError,
+    ConceptoInexistenteError,
+    LibroInvalidoError,
+    LibroNoEncontradoError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -219,3 +224,74 @@ def listar_libros_con_imagenes(conn):
         )
         libro["images"].append({"url": image_url, "is_cover": is_cover})
     return list(libros.values())
+
+
+# --------------------------------------------------------------------
+# CRUD del catálogo (sql/crud_libros_extension.sql). "Un usuario
+# registrado puede hacer las operaciones CRUD" -- la validación de que el
+# usuario inició sesión ocurre en la aplicación de escritorio contra el
+# microservicio login (puerto 5000, servicio aparte); aquí solo vive la
+# escritura del catálogo en sí.
+# --------------------------------------------------------------------
+
+def _libro_invalido_desde(exc):
+    detalle = exc.diag.message_primary if exc.diag and exc.diag.message_primary else str(exc)
+    return LibroInvalidoError(detalle)
+
+
+def crear_libro(conn, *, isbn, title, publication_year, price, stock, category, format, authors):
+    """POST /books -> fn_crear_libro(...). Categoría/formato/autor(es) se
+    crean si no existen (ver el docstring de la función SQL)."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT fn_crear_libro(%s, %s, %s, %s, %s, %s, %s, %s)",
+                (isbn, title, publication_year, price, stock, category, format, authors),
+            )
+            (book_id,) = cur.fetchone()
+        conn.commit()
+        return book_id
+    except pg_errors.UniqueViolation as exc:
+        conn.rollback()
+        raise LibroInvalidoError(f"Ya existe un libro con isbn {isbn!r}.") from exc
+    except (pg_errors.CheckViolation, pg_errors.RaiseException, pg_errors.NotNullViolation) as exc:
+        conn.rollback()
+        raise _libro_invalido_desde(exc) from exc
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def actualizar_libro(conn, *, isbn, title, publication_year, price, stock, category, format, authors):
+    """PUT /books/<isbn> -> fn_actualizar_libro(...). False de la función
+    (isbn inexistente) se traduce aquí a LibroNoEncontradoError."""
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT fn_actualizar_libro(%s, %s, %s, %s, %s, %s, %s, %s)",
+                (isbn, title, publication_year, price, stock, category, format, authors),
+            )
+            (encontrado,) = cur.fetchone()
+        conn.commit()
+        if not encontrado:
+            raise LibroNoEncontradoError(f"No existe un libro con isbn {isbn!r}.")
+        return True
+    except (pg_errors.CheckViolation, pg_errors.RaiseException, pg_errors.NotNullViolation) as exc:
+        conn.rollback()
+        raise _libro_invalido_desde(exc) from exc
+    except LibroNoEncontradoError:
+        raise
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def eliminar_libro(conn, isbn):
+    """DELETE /books/<isbn> -> fn_eliminar_libro(isbn)."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT fn_eliminar_libro(%s)", (isbn,))
+        (encontrado,) = cur.fetchone()
+    conn.commit()
+    if not encontrado:
+        raise LibroNoEncontradoError(f"No existe un libro con isbn {isbn!r}.")
+    return True

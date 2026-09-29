@@ -36,8 +36,9 @@ sleep 3
 echo "soap.service:  $(systemctl is-active soap)   (puerto 5001, loopback)"
 echo "login.service: $(systemctl is-active login)  (puerto 5000, loopback)"
 
-say "3) Nginx: location /soap (mismo patrón que /library)"
+say "3) Nginx: location /soap y /auth (mismo patrón que /library)"
 sudo cp "$DEPLOY_DIR/nginx-soap-proxy.conf" /etc/nginx/default.d/soap-proxy.conf
+sudo cp "$DEPLOY_DIR/nginx-auth-proxy.conf" /etc/nginx/default.d/auth-proxy.conf
 sudo nginx -t
 sudo systemctl reload nginx
 
@@ -45,5 +46,6 @@ say "4) Verificación"
 curl -s -o /dev/null -w '/soap/wsdl (local)        -> HTTP %{http_code}\n' http://127.0.0.1:5001/wsdl
 curl -s -o /dev/null -w '/soap/books (via nginx)    -> HTTP %{http_code}\n' http://127.0.0.1/soap/books
 curl -s -o /dev/null -w '/health del login (local)  -> HTTP %{http_code}\n' http://127.0.0.1:5000/health
+curl -s -o /dev/null -w '/auth/health (via nginx)   -> HTTP %{http_code}\n' http://127.0.0.1/auth/health
 curl -s -o /dev/null -w '/library (el monolito, no debe romperse) -> HTTP %{http_code}\n' http://127.0.0.1/library/
 say "LISTO."
