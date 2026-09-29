@@ -13,11 +13,14 @@ aquí arriba crearía un ciclo. Para cuando la vista decorada realmente se
 ejecuta (una petición HTTP), rest_api ya terminó de cargarse por completo.
 """
 import functools
+import logging
 
 import jwt as pyjwt
 from flask import request
 
 from config.settings import Config
+
+logger = logging.getLogger(__name__)
 
 
 def _rechazar(mensaje):
@@ -34,6 +37,7 @@ def token_required(view_func):
     @functools.wraps(view_func)
     def wrapper(*args, **kwargs):
         auth_header = request.headers.get("Authorization")
+        logger.info("%s %s -- Authorization recibida: %s", request.method, request.path, auth_header)
         if not auth_header:
             return _rechazar("Falta la cabecera Authorization. Inicia sesión en /login y "
                              "envía 'Authorization: Bearer <token>'.")
