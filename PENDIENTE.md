@@ -59,7 +59,7 @@ Validación de esta continuación: 67 tests de books pasaron con Python 3.12 en 
 
 ## App Python Tk (2026-10-06)
 
-La app de escritorio (`Desktop\AppPythonTkpps\Python_app`, copia en `Entrega_Python_TK`; no está en este repositorio) ya consume los 6 microservicios:
+La app de escritorio (`Desktop/AppPythonTk/apps/Python_app`, copia en `Entrega_Python_TK`; no está en este repositorio) ya consume los 6 microservicios:
 pestañas CRUD de Autores, Usuarios, Pedidos y Pagos, reloj y renovación automática del JWT, semáforos por servicio y Redis,
 y bitácora HTTP. `tests/gui_integration.py` maneja la GUI real contra los servicios (59 comprobaciones OK, incluida la fase de Redis caído).
 Para probar en local sin la VM: `PG_PORT=55432 DEMO_PW_FILE=pw.txt bash e2e/serve_local.sh` (puertos 15000-15005, usuarios demo-admin/staff/customer@example.com)
