@@ -21,13 +21,14 @@ caché, candados, idempotencia). Diseño completo en [`docs/REDIS_Y_JWT.md`](doc
 4. Capturar la evidencia y la reflexión que pide el profesor.
 
 ## Pendiente de código / documentación
-- [ ] README propio de `services/users`, `authors`, `pedidos`, `pagos` (endpoints, roles, variables de `.env.example`; la tabla de roles ya está en `docs/REDIS_Y_JWT.md`).
-- [ ] Actualizar `README.md` raíz (tabla de servicios: faltan puertos 5002–5005) y `deploy/README.md` (scripts nuevos, units, `nginx-microservices-proxy.conf`, e2e).
-- [ ] Actualizar `services/soap/README.md`: su sección «Autenticación JWT» aún habla de `auth_jwt.py` y `JWT_SECRET`; ahora es `library_common.JwtAuth` y `JWT_SECRET_KEY`, con caché `books:*`.
-- [ ] HTTPS: falta `deploy/setup_tls_vm.sh` (certificado autofirmado en nginx; sin dominio no hay Let's Encrypt). El firewall de GCP ya permite 443; abrirlo/cambiarlo lo decide el dueño.
-- [ ] Colecciones Postman de los servicios nuevos y actualizar la de login (`/token/refresh`, campos nuevos).
-- [ ] Revisar en la VM que books no corra con `FLASK_ENV=development`/debug (arranca con `python app.py`, servidor de desarrollo); idealmente moverlo a gunicorn como los demás.
-- [ ] Sincronizar `Desktop\app` con este repo (el trabajo está en `Desktop\auth`).
+- [x] README propio de `services/users`, `authors`, `pedidos`, `pagos` (endpoints, roles, variables de `.env.example`; la tabla de roles ya está en `docs/REDIS_Y_JWT.md`).
+- [x] Actualizar `README.md` raíz (tabla de servicios: faltan puertos 5002–5005) y `deploy/README.md` (scripts nuevos, units, `nginx-microservices-proxy.conf`, e2e).
+- [x] Actualizar `services/soap/README.md`: su sección «Autenticación JWT» documenta `library_common.JwtAuth` y `JWT_SECRET_KEY`, con caché `books:*`.
+- [x] HTTPS: creado `deploy/setup_tls_vm.sh` (pendiente ejecutar en VM) (certificado autofirmado en nginx; sin dominio no hay Let's Encrypt). El firewall de GCP ya permite 443; abrirlo/cambiarlo lo decide el dueño.
+- [x] Colecciones Postman de los servicios nuevos y actualizar la de login (`/token/refresh`, campos nuevos).
+- [x] Configuración local de books migrada a gunicorn, producción y debug desactivado.
+- [ ] Aplicar el despliegue y comprobar en la VM que books corre con la unit nueva (no validado remotamente).
+- [x] Sincronizados los archivos del proyecto en `Desktop\app`, con respaldo de reemplazos en `.auth-sync-backups`; sin copiar .env, entornos ni proyectos ajenos. Script repetible: `deploy/sync_workspace.ps1`.
 - [ ] La app Electron (`electron-catalog`) no usa JWT (solo hace GET públicos); no requiere cambios por ahora.
 
 ## Limitaciones conocidas
@@ -49,3 +50,9 @@ cd services/soap   && pip install -r requirements-dev.txt && pytest
 # todo el sistema en Docker (PostgreSQL + Redis + 6 servicios)
 bash e2e/run_local.sh
 ```
+
+## Continuación local
+
+Se añadieron READMEs y colecciones de users/authors/pedidos/pagos, refresh en Postman login, documentación raíz/deploy y script TLS. Books usa gunicorn en la unit nueva. La ejecución en VM y su evidencia siguen pendientes. La copia externa conserva archivos antiguos y `auth-service` histórico; no elimina material del destino.
+
+Validación de esta continuación: 67 tests de books pasaron con Python 3.12 en `.venv-check`; JSON de las cinco colecciones válido y rutas de los cuatro servicios contrastadas con el código. `bash -n` pasó para TLS y setup_microservices; `git diff --check` sin errores. TLS/nginx/systemd no se han ejecutado en la VM y no se volvió a ejecutar e2e Docker.

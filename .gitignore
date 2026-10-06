@@ -1,5 +1,8 @@
 .env
 .venv/
+.venv-check/
+*.egg-info/
+build/
 venv/
 __pycache__/
 *.pyc

@@ -1,53 +1,56 @@
-# deploy/ — desplegar y reproducir la VM
+# Despliegue en la VM
 
-Scripts y unidades systemd para levantar `login` y `soap` en la VM (Google Cloud, CentOS Stream 10) detrás de
-Nginx. Se corren **en la VM**, por SSH; ninguno se ejecuta desde tu máquina local.
+Scripts para CentOS Stream 10, ejecutados por SSH en la VM. El despliegue de microservicios necesita una base Library ya existente, el rol de login, Postfix cuando se use correo y `/opt/library_soap_service` configurado. No se ha ejecutado este despliegue nuevo en la VM; consulta [PENDIENTE.md](../PENDIENTE.md).
 
-## Orden para una VM nueva
+## Secuencia
 
-| # | Script | Qué hace | Pide contraseña de |
-|---|---|---|---|
-| 1 | `../data/migrations/000_create_login_role.sql` … `003_login_service_grants.sql` | Esquema de `library_db` para `login` (ver [`../data/README.md`](../data/README.md)) | `postgres`, `library_user` |
-| 2 | `setup_db_vm.sh` | Alternativa al paso anterior: aplica las migraciones con respaldo automático y verificación antes/después | `postgres`, `library_user` |
-| 3 | `setup_gmail_relay_vm.sh` | Configura Postfix para entregar correo por Gmail (puerto 587; Google Cloud bloquea el 25 saliente) | tu Gmail (contraseña de aplicación) |
-| 4 | `setup_soap_and_nginx_vm.sh` | Instala `soap.service`, `login.service` y el proxy de Nginx `/soap` | ninguna (no toca la BD) |
+```bash
+cd /opt/auth
+git pull
+bash deploy/setup_microservices_vm.sh
+bash deploy/setup_tls_vm.sh IP_O_NOMBRE_DE_LA_VM
+# Solo en una ventana de pruebas: detiene y reinicia Redis.
+bash deploy/evidencias_microservicios.sh
+```
 
-`setup_soap_and_nginx_vm.sh` asume que `/opt/library_soap_service` (con su `.venv` y `.env`, ver
-[`../services/soap/README.md`](../services/soap/README.md)) y `/opt/auth/services/login` (con su `.venv` y
-`.env`) **ya existen**. No los crea ni instala sus dependencias — solo las unidades systemd y el `location` de
-Nginx. Es **idempotente**: correrlo de nuevo no cambia nada si ya estaba aplicado.
+`setup_microservices_vm.sh` pide las contraseñas de postgres y library_user por teclado, respalda la base, aplica 006–011 y configura roles dedicados, Redis y los seis entornos. Genera/reutiliza contraseñas locales, comparte JWT_SECRET_KEY/REDIS_URL y deja .env con permisos 600. No publiques esos archivos. La migración 011 se ejecuta como postgres. Las verificaciones finales consultan /health; revisa cualquier aviso antes de continuar.
 
-## Unidades systemd (referencia de lo que ya corre en la VM)
+Redis usa requirepass, AOF y noeviction. Las units `login.service`, `soap.service`, `users.service`, `authors.service`, `pedidos.service`, `pagos.service` arrancan gunicorn en 127.0.0.1:5000–5005. Books conserva `/opt/library_soap_service`; la unit fuerza producción y desactiva debug. Revisa en la VM:
 
-- **`login.service`** — gunicorn, puerto 5000, solo loopback. Depende de Postfix (`Wants=postfix.service`) pero
-  arranca aunque Postfix falle (el correo simplemente no sale).
-- **`soap.service`** — servidor de desarrollo de Flask, puerto 5001, solo loopback. `Environment=SOAP_PORT=5001`
-  sobreescribe el `5000` que trae `/opt/library_soap_service/.env` (ese archivo no se toca).
-- **`nginx-soap-proxy.conf`** — se instala en `/etc/nginx/default.d/`, mismo patrón que el `library-proxy.conf`
-  ya existente (Ejercicio Guiado 02) que expone el monolito bajo `/library`.
+```bash
+systemctl status login soap users authors pedidos pagos
+systemctl cat soap
+curl -fsS 'http://127.0.0.1:5001/health?format=json'
+```
 
-Ninguno de los dos servicios se expone directamente a Internet: solo Nginx escucha en el puerto 80 público
-(regla de firewall `allow-library-http`); `login` ni siquiera está publicado ahí todavía (se usa con un túnel
-SSH: `gcloud compute ssh maquina-02 ... -- -L 5050:localhost:5000`).
+`nginx-microservices-proxy.conf` instala `/users/`, `/authors/`, `/pedidos/`, `/pagos/` y elimina el prefijo. `/soap/` está en `nginx-soap-proxy.conf`; `/auth/` y `/library/` deben estar en la configuración existente. Verifica con `sudo nginx -T` y no dupliques locations. Por ejemplo, `/authors/authors` apunta a `/authors` en el servicio. No expongas los puertos Flask en el firewall.
 
-## Otros scripts
+## TLS autofirmado
 
-- **`deploy_jwt.sh`** — despliega la autenticación JWT: aplica
-  `../data/migrations/005_login_jwt_role_grant.sql`, genera/sincroniza una
-  única `JWT_SECRET` en el `.env` de `login` y de `soap` (debe ser idéntica
-  en ambos), copia el código actualizado de los dos servicios, reinicia
-  `login.service`/`soap.service` y verifica con `curl` que las escrituras
-  de `/books` quedan protegidas. Pide la contraseña de `library_user` solo
-  para el permiso nuevo (`SELECT is_admin`). Ejecutar en la VM:
-  `bash /opt/auth/deploy/deploy_jwt.sh`.
-- **`demo_json.sh correo@gmail.com [TOKEN]`** — corre `curl` (health, registro, verificación, login, sesión,
-  logout) mostrando cada JSON formateado. Pensado para ver el flujo completo en la terminal.
-- **`evidencias_vm.sh 1|2|3|4|5 [correo]`** — comandos de evidencia para la entrega/documentación (formatos
-  XML/JSON, validaciones, login/sesión/logout, base de datos, `pytest`).
+`setup_tls_vm.sh IP_O_NOMBRE` crea un certificado RSA de 365 días con SAN y clave privada de permisos 600 en `/etc/nginx/tls/library`. Reutiliza un certificado vigente que coincida con el nombre; si está vencido o el nombre cambia, se detiene para permitir una renovación deliberada. Instala un servidor 443 que incluye los proxies de `/etc/nginx/default.d/`. Valida nginx y restaura la configuración anterior si es rechazada. Conserva HTTP y no modifica el firewall de GCP ni firewalld.
 
-## Notas
+Copia únicamente el certificado público `server.crt` al cliente e impórtalo en su almacén de confianza/Postman. Nunca copies la clave privada. Comprueba TLS con el certificado confiado:
 
-- La IP externa de la VM es **efímera**: cambia si se apaga y se enciende. Los scripts usan `127.0.0.1`/`localhost`
-  para todo lo que corre en la propia VM, así que no dependen de ella.
-- Nada de esto guarda contraseñas: `setup_db_vm.sh` y `setup_gmail_relay_vm.sh` las piden por teclado (no se
-  muestran ni se escriben en ningún archivo del repo); `setup_soap_and_nginx_vm.sh` no necesita ninguna.
+```bash
+curl --cacert server.crt 'https://IP_O_NOMBRE/soap/health?format=json'
+```
+
+El nombre o IP debe coincidir con el SAN. Si ya existe un servidor 443 para ese nombre, revisa y adapta su configuración antes de ejecutar el script.
+
+## Pruebas y evidencia
+
+`evidencias_microservicios.sh` realiza escrituras y una caída real de Redis; exige una ventana de pruebas y datos adecuados. La evidencia de VM sigue pendiente. Para reproducir localmente con PostgreSQL, Redis y los seis servicios: `bash e2e/run_local.sh`. Unitarias: `pytest` en cada carpeta; integración real exige TEST_DATABASE_URL.
+
+## Scripts anteriores
+
+- `setup_db_vm.sh`: migraciones iniciales de login con respaldo.
+- `setup_gmail_relay_vm.sh`: Postfix/Gmail con contraseña de aplicación local.
+- `setup_soap_and_nginx_vm.sh`: units y proxy inicial, requiere entornos existentes.
+- `deploy_jwt.sh`: despliegue histórico del JWT anterior; usa JWT_SECRET. Para el esquema actual usa setup_microservices_vm.sh.
+- `demo_json.sh` y `evidencias_vm.sh`: ejemplos y evidencia del flujo inicial de login.
+
+No introduzcas tokens en argumentos compartidos ni adjuntes .env/logs con secretos al entregar evidencia.
+
+## Copia local a Desktop\app
+
+En PowerShell, `./deploy/sync_workspace.ps1` muestra los cambios; `./deploy/sync_workspace.ps1 -Apply` copia services, data, deploy, docs, e2e y documentación raíz. Respalda los archivos reemplazados bajo `.auth-sync-backups` en el destino, conserva los demás proyectos y excluye .env y entornos virtuales. No elimina archivos antiguos. `auth-service` es una copia histórica distinta y no se reemplaza.

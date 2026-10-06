@@ -50,25 +50,22 @@ cliente lo reenvía aquí como:
 Authorization: Bearer <token>
 ```
 
-Validación (`auth_jwt.py`, decorador `@token_required`, aplicado solo a
-las 4 vistas de escritura de `rest_api.py`): cabecera `Authorization`
-presente, esquema `Bearer`, token no vacío, firma HS256 válida contra
-`JWT_SECRET`, y no expirado. Cualquier caso que falle responde `401` sin
-llegar a ejecutar la operación:
+Validación con `library_common.JwtAuth`: HS256, firma con `JWT_SECRET_KEY`, issuer,
+expiración, claims obligatorios y revocación `jwt:revoked:<jti>` en Redis.
+Escrituras admiten admin/staff: token inválido o revocado → 401; rol insuficiente → 403;
+Redis no disponible → 503 (falla cerrado). La configuración incompleta impide arrancar.
 
-| Caso | Respuesta |
-|---|---|
-| Sin cabecera `Authorization` | 401 |
-| Cabecera sin el esquema `Bearer <token>` | 401 |
-| Firma inválida (token alterado o de otra clave) | 401 |
-| Token expirado | 401 |
-| Algoritmo distinto de HS256 | 401 |
-| `JWT_SECRET` no configurada en el servicio (falla cerrado) | 401 |
+`JWT_SECRET_KEY` (mínimo 32 caracteres), `JWT_ISSUER` y `REDIS_URL` deben coincidir
+con login y los demás servicios. Nunca versiones secretos. El refresh rota tokens en login;
+logout revoca el JWT. [Contrato JWT y roles](../../docs/REDIS_Y_JWT.md).
 
-`JWT_SECRET` (variable de entorno, ver `.env.example`) **debe ser
-idéntica** a la de `services/login` — es un secreto compartido entre
-ambos microservicios, nunca se guarda en la base de datos ni en el
-repositorio.
+`GET /books` y `GET /books/<isbn>` usan caché Redis `books:list:all` y `books:<isbn>`
+(TTL configurable con `CACHE_TTL_SECONDS`, 60 s por defecto). Redis caído permite leer
+PostgreSQL en estas rutas públicas; las escrituras invalidan la caché.
+
+En producción, `deploy/soap.service` ejecuta gunicorn con `app:create_app()` en
+127.0.0.1:5001 y fuerza `FLASK_ENV=production`/`FLASK_DEBUG=0`.
+Instala también `pip install ../shared` en el venv del servicio antes de arrancar.
 
 ---
 
@@ -95,7 +92,7 @@ Fuentes de verdad del contrato — léelas antes de tocar el código:
 ### 1.2 Entorno virtual y dependencias
 
 ```bash
-cd library_soap_service
+cd services/soap
 python -m venv venv
 venv\Scripts\activate        # Windows
 pip install -r requirements.txt
@@ -134,8 +131,12 @@ Variables usadas (ver `config/settings.py`):
 | Variable | Uso |
 |---|---|
 | `FLASK_ENV` | `development` activa el modo debug de Flask. |
-| `SOAP_HOST` / `SOAP_PORT` | dirección donde escucha el servicio (puerto sugerido `5000`, el monolito ya usa `3000`). |
+| `SOAP_HOST` / `SOAP_PORT` | dirección donde escucha el servicio (puerto de despliegue `5001`, el monolito ya usa `3000`). |
 | `DATABASE_URL` | cadena de conexión de `soap_service_user` a `library_db`. |
+| `JWT_SECRET_KEY` / `JWT_ISSUER` | Firma compartida (≥32 caracteres) y emisor de login. |
+| `REDIS_URL` | Redis protegido para revocación y caché. |
+| `REDIS_CONNECT_TIMEOUT` / `REDIS_SOCKET_TIMEOUT` | Timeouts en segundos. |
+| `CACHE_TTL_SECONDS` / `CORS_ORIGINS` | TTL de lectura y orígenes permitidos. |
 | `LOG_LEVEL` | nivel de `logging` (aquí es donde va el detalle técnico real de cualquier error, nunca en un SOAP Fault). |
 | `WSSE_NONCE_WINDOW_SECONDS` | ventana de tolerancia (segundos) para `wsu:Created` y para deduplicar `wsse:Nonce` en WS-Security. |
 

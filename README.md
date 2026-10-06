@@ -1,40 +1,39 @@
-# auth — plataforma de librería en línea (Library)
+# auth — Library
 
-Monorepo con los microservicios y apps de la plataforma. Todos comparten la base de datos PostgreSQL
-`library_db`, desplegada en una VM (Google Cloud, CentOS Stream 10) con Nginx como único punto de entrada
-público (puerto 80): cada servicio corre en `127.0.0.1` y Nginx lo expone bajo un prefijo (`/library`, `/soap`).
+Monorepo de seis microservicios Flask con PostgreSQL (`library_db`, fuente de verdad), Redis para sesiones, revocación JWT, caché, candados e idempotencia, y Electron para consultar el catálogo.
 
+## Servicios
+
+- [login](services/login/README.md): 5000, prefijo nginx `/auth/`.
+- [books / SOAP](services/soap/README.md): 5001, prefijo `/soap/`.
+- [users](services/users/README.md): 5002, prefijo `/users/`.
+- [authors](services/authors/README.md): 5003, prefijo `/authors/`.
+- [pedidos](services/pedidos/README.md): 5004, prefijo `/pedidos/`.
+- [pagos](services/pagos/README.md): 5005, prefijo `/pagos/`.
+
+Los prefijos describen el proxy previsto; verifica su instalación en la VM. Nginx elimina el prefijo: `/users/users/me` llega a `/users/me`. Todos los servicios escuchan en loopback; el monolito externo continúa en 3000 bajo `/library/`.
+
+## Configuración y seguridad
+
+Instala `services/shared` en cada entorno virtual y configura el `.env` de cada servicio a partir de su `.env.example`. Usa el mismo `JWT_SECRET_KEY` y Redis protegido en los seis; cada servicio tiene su propio rol PostgreSQL con EXECUTE de sus funciones. Nunca versiones secretos. [Diseño JWT/Redis y permisos](docs/REDIS_Y_JWT.md).
+
+Books y authors admiten lecturas públicas; sus escrituras exigen admin/staff. Los demás recursos privados requieren JWT. Si Redis falla, autenticación y rutas protegidas devuelven 503; las lecturas públicas siguen por PostgreSQL.
+
+## Desarrollo, pruebas y despliegue
+
+- [Base de datos y migraciones](data/README.md).
+- [Despliegue CentOS, TLS y evidencia](deploy/README.md).
+- [Pendientes y estado de validación](PENDIENTE.md).
+- [Electron](electron-catalog/README.md): consume GET públicos; configura la URL `/soap/books` y la base de imágenes `/library`.
+- Colecciones Postman en `services/<servicio>/postman/`; configura variables locales y usa datos de prueba.
+
+```bash
+# Desde la carpeta de un servicio, con su venv activo:
+pip install ../shared
+pip install -r requirements-dev.txt
+pytest
+# Desde la raíz, con Docker disponible:
+bash e2e/run_local.sh
 ```
-auth/
-├── services/
-│   ├── login/          # ★ Microservicio de autenticación: Flask + Psycopg 3 + PostgreSQL, puerto 5000,
-│   │                     XML/JSON, confirmación de correo por Postfix, Swagger → ver su README
-│   └── soap/            # Servicio books: SOAP + REST (/books, /concepts) — Flask, puerto 5001
-├── electron-catalog/     # App de escritorio (Electron) que consume el servicio books
-├── data/                 # Esquema canónico de la BD (schema.sql), migraciones, rollbacks y auditoría
-└── deploy/               # Scripts y unidades systemd para desplegar todo en la VM
-```
 
-`services/soap` y `electron-catalog` tienen cada uno su propio repositorio de origen
-(`ejercicio05-library-soap-rest`, `catalogo-libros-electron`); aquí se incluyen como copia de referencia para
-tener todo el monorepo en un solo lugar versionado, junto al servicio `login` y a `data/`.
-
-## Servicios y dónde viven
-
-| Servicio | Puerto (loopback) | Expuesto en Nginx | Código |
-|---|---|---|---|
-| `login` | 5000 | *(sin publicar; usar túnel SSH)* | [`services/login`](services/login/README.md) |
-| `soap` (books) | 5001 | `/soap/` → `/soap/books`, `/soap/wsdl`, `/soap/soap`, `/soap/concepts` | [`services/soap`](services/soap/README.md) |
-| `web-monolito` (no incluido aquí) | 3000 | `/library/` | repo `IntegracionesLibrary` |
-
-## Por dónde empezar
-
-- **Login:** [`services/login/README.md`](services/login/README.md) — instalación, Postfix, endpoints, Postman.
-- **Base de datos:** [`data/README.md`](data/README.md). Cambios **solo aditivos**: no alteran books, Electron
-  ni el monolito.
-- **Desplegar/reproducir en la VM:** [`deploy/README.md`](deploy/README.md) — de cero o para levantar de nuevo
-  `login.service`, `soap.service` y el proxy de Nginx.
-- **Swagger del login:** `http://<host>:5000/docs/` con el servicio en marcha.
-- **Electron:** [`electron-catalog/README.md`](electron-catalog/README.md). El endpoint y la base de imágenes se
-  configuran dentro de la app (⚙ Configuración) — apuntan a `http://<IP-de-la-VM>/soap/books` y
-  `http://<IP-de-la-VM>/library`. La IP externa de la VM es efímera: cambia si se apaga y enciende.
+Los tests con PostgreSQL real requieren `TEST_DATABASE_URL`. La IP externa de la VM puede cambiar al reiniciar. `entrega_fraude/` y la transcripción son ajenos a este trabajo.

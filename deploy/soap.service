@@ -1,5 +1,5 @@
 [Unit]
-Description=Library SOAP service (Flask dev server, puerto 5001, loopback)
+Description=Library SOAP service (gunicorn, puerto 5001, loopback)
 After=network.target postgresql.service redis.service
 Wants=redis.service
 
@@ -7,7 +7,9 @@ Wants=redis.service
 User=rutil
 WorkingDirectory=/opt/library_soap_service
 Environment=SOAP_PORT=5001
-ExecStart=/opt/library_soap_service/.venv/bin/python /opt/library_soap_service/app.py
+Environment=FLASK_ENV=production
+Environment=FLASK_DEBUG=0
+ExecStart=/opt/library_soap_service/.venv/bin/gunicorn --workers 2 --bind 127.0.0.1:5001 app:create_app()
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

@@ -1,12 +1,12 @@
 {
   "info": {
-    "name": "Login service · Library (puerto 5000)",
+    "name": "Login service Ã‚Â· Library (puerto 5000)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Ejecuta 1 y 2 con el Collection Runner; revisa tu Gmail y confirma (carpeta 3); luego ejecuta 3 y 4. Postman guarda la cookie de sesión por sí solo. La carpeta 5 es la prueba manual de caducidad. Cambia `email_domain` a gmail.com (o a un dominio tuyo) para que el correo llegue a una bandeja real."
+    "description": "Ejecuta 1 y 2 con el Collection Runner; revisa tu Gmail y confirma (carpeta 3); luego ejecuta 3 y 4. Postman guarda la cookie de sesiÃƒÂ³n por sÃƒÂ­ solo. La carpeta 5 es la prueba manual de caducidad. Cambia `email_domain` a gmail.com (o a un dominio tuyo) para que el correo llegue a una bandeja real. JWT: el login JSON guarda token/refresh_token; ejecuta la renovaciÃƒÂ³n antes de logout y exporta las colecciones sin secretos locales."
   },
   "item": [
     {
-      "name": "1 · Health",
+      "name": "1 Ã‚Â· Health",
       "item": [
         {
           "name": "GET /health (sin format => XML)",
@@ -112,7 +112,7 @@
           ]
         },
         {
-          "name": "GET /health?format=yaml (inválido => 400 XML)",
+          "name": "GET /health?format=yaml (invÃƒÂ¡lido => 400 XML)",
           "request": {
             "method": "GET",
             "header": [],
@@ -150,7 +150,7 @@
       ]
     },
     {
-      "name": "2 · Registro (envía el correo por Postfix)",
+      "name": "2 Ã‚Â· Registro (envÃƒÂ­a el correo por Postfix)",
       "item": [
         {
           "name": "POST /register (sin format => XML)",
@@ -175,7 +175,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nombre\": \"Ana\",\n  \"apellido_paterno\": \"López\",\n  \"apellido_materno\": \"Díaz\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "raw": "{\n  \"nombre\": \"Ana\",\n  \"apellido_paterno\": \"LÃƒÂ³pez\",\n  \"apellido_materno\": \"DÃƒÂ­az\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -238,7 +238,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nombre\": \"Ana\",\n  \"apellido_paterno\": \"López\",\n  \"apellido_materno\": \"Díaz\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "raw": "{\n  \"nombre\": \"Ana\",\n  \"apellido_paterno\": \"LÃƒÂ³pez\",\n  \"apellido_materno\": \"DÃƒÂ­az\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -261,7 +261,7 @@
           ]
         },
         {
-          "name": "POST /register?format=json (mismo correo en MAYÚSCULAS => 409)",
+          "name": "POST /register?format=json (mismo correo en MAYÃƒÅ¡SCULAS => 409)",
           "request": {
             "method": "POST",
             "header": [
@@ -288,7 +288,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nombre\": \"Ana\",\n  \"apellido_paterno\": \"López\",\n  \"apellido_materno\": \"Díaz\",\n  \"email\": \"{{email_upper}}\",\n  \"password\": \"{{password}}\"\n}",
+              "raw": "{\n  \"nombre\": \"Ana\",\n  \"apellido_paterno\": \"LÃƒÂ³pez\",\n  \"apellido_materno\": \"DÃƒÂ­az\",\n  \"email\": \"{{email_upper}}\",\n  \"password\": \"{{password}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -319,7 +319,7 @@
           ]
         },
         {
-          "name": "POST /register?format=json (correo y password inválidos => 400)",
+          "name": "POST /register?format=json (correo y password invÃƒÂ¡lidos => 400)",
           "request": {
             "method": "POST",
             "header": [
@@ -346,7 +346,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"nombre\": \"Ana\",\n  \"apellido_paterno\": \"López\",\n  \"apellido_materno\": \"Díaz\",\n  \"email\": \"no-es-correo\",\n  \"password\": \"123\"\n}",
+              "raw": "{\n  \"nombre\": \"Ana\",\n  \"apellido_paterno\": \"LÃƒÂ³pez\",\n  \"apellido_materno\": \"DÃƒÂ­az\",\n  \"email\": \"no-es-correo\",\n  \"password\": \"123\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -463,7 +463,7 @@
           ]
         },
         {
-          "name": "POST /resend-verification (=> 202, máx. uno por minuto)",
+          "name": "POST /resend-verification (=> 202, mÃƒÂ¡x. uno por minuto)",
           "request": {
             "method": "POST",
             "header": [
@@ -512,7 +512,7 @@
           ]
         },
         {
-          "name": "POST /resend-verification (correo desconocido => 202 idéntico)",
+          "name": "POST /resend-verification (correo desconocido => 202 idÃƒÂ©ntico)",
           "request": {
             "method": "POST",
             "header": [
@@ -558,8 +558,8 @@
       ]
     },
     {
-      "name": "3 · Confirmación del correo (abrir el enlace)",
-      "description": "PASO MANUAL con Gmail: abre el correo que llegó a tu bandeja y haz clic en \"Da clic aquí para confirmar tu cuenta\", o copia el token que viene en el correo (también es lo que va después de /verify/ en el enlace) y pégalo en la variable de colección `verify_token`; o simplemente haz clic en el enlace del correo desde el navegador y ejecuta estas peticiones (responderán `already_confirmed`). Con Mailpit (solo desarrollo) define `mailpit_url` y el token se obtiene solo.",
+      "name": "3 Ã‚Â· ConfirmaciÃƒÂ³n del correo (abrir el enlace)",
+      "description": "PASO MANUAL con Gmail: abre el correo que llegÃƒÂ³ a tu bandeja y haz clic en \"Da clic aquÃƒÂ­ para confirmar tu cuenta\", o copia el token que viene en el correo (tambiÃƒÂ©n es lo que va despuÃƒÂ©s de /verify/ en el enlace) y pÃƒÂ©galo en la variable de colecciÃƒÂ³n `verify_token`; o simplemente haz clic en el enlace del correo desde el navegador y ejecuta estas peticiones (responderÃƒÂ¡n `already_confirmed`). Con Mailpit (solo desarrollo) define `mailpit_url` y el token se obtiene solo.",
       "item": [
         {
           "name": "GET /verify/{{verify_token}} (XML por defecto)",
@@ -688,7 +688,7 @@
       ]
     },
     {
-      "name": "4 · Login / sesión / logout",
+      "name": "4 Ã‚Â· Login / sesiÃƒÂ³n / logout",
       "item": [
         {
           "name": "POST /login?format=json (password incorrecta => 401)",
@@ -740,7 +740,7 @@
           ]
         },
         {
-          "name": "GET /session (sin sesión => 401 not_authenticated)",
+          "name": "GET /session (sin sesiÃƒÂ³n => 401 not_authenticated)",
           "request": {
             "method": "GET",
             "header": [],
@@ -784,7 +784,7 @@
           ]
         },
         {
-          "name": "POST /login (sin format => XML, inicia sesión)",
+          "name": "POST /login (sin format => XML, inicia sesiÃƒÂ³n)",
           "request": {
             "method": "POST",
             "header": [
@@ -1001,11 +1001,11 @@
       ]
     },
     {
-      "name": "5 · Caducidad de 30 min (manual)",
-      "description": "Inicia sesión y espera 30 min (o en la BD: UPDATE login_sessions SET created_at = now()-interval '31 minutes', expires_at = now()-interval '1 minute' WHERE revoked_at IS NULL; o arranca el servicio con SESSION_TIMEOUT_MINUTES=1). Después ejecuta 'GET /session' de esta carpeta.",
+      "name": "5 Ã‚Â· Caducidad de 30 min (manual)",
+      "description": "Inicia sesiÃƒÂ³n y espera 30 min (o en la BD: UPDATE login_sessions SET created_at = now()-interval '31 minutes', expires_at = now()-interval '1 minute' WHERE revoked_at IS NULL; o arranca el servicio con SESSION_TIMEOUT_MINUTES=1). DespuÃƒÂ©s ejecuta 'GET /session' de esta carpeta.",
       "item": [
         {
-          "name": "POST /login?format=json (nueva sesión)",
+          "name": "POST /login?format=json (nueva sesiÃƒÂ³n)",
           "request": {
             "method": "POST",
             "header": [
@@ -1049,6 +1049,21 @@
                   "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));"
                 ]
               }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.test(\"JWT y refresh presentes\", () => { pm.expect(b.token).to.be.a(\"string\"); pm.expect(b.refresh_token).to.be.a(\"string\"); pm.expect(b.token_expires_in_seconds).to.eql(1200); });",
+                  "  pm.collectionVariables.set(\"token\", b.token);",
+                  "  pm.collectionVariables.set(\"refresh_token\", b.refresh_token);",
+                  "}"
+                ]
+              }
             }
           ]
         },
@@ -1087,6 +1102,50 @@
           ]
         }
       ]
+    },
+    {
+      "name": "JWT Ã‚Â· Renovar antes de logout (rotaciÃƒÂ³n)",
+      "item": [
+        {
+          "name": "POST /token/refresh",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/token/refresh?format=json",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"refresh_token\":\"{{refresh_token}}\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "  const b = pm.response.json();",
+                  "  pm.test(\"JWT y refresh presentes\", () => { pm.expect(b.token).to.be.a(\"string\"); pm.expect(b.refresh_token).to.be.a(\"string\"); pm.expect(b.token_expires_in_seconds).to.eql(1200); });",
+                  "  pm.collectionVariables.set(\"token\", b.token);",
+                  "  pm.collectionVariables.set(\"refresh_token\", b.refresh_token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
@@ -1096,7 +1155,7 @@
     },
     {
       "key": "password",
-      "value": "ClaveSegura123"
+      "value": ""
     },
     {
       "key": "email_domain",
@@ -1116,6 +1175,14 @@
     },
     {
       "key": "mailpit_url",
+      "value": ""
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "refresh_token",
       "value": ""
     }
   ]
