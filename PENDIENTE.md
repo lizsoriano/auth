@@ -56,3 +56,13 @@ bash e2e/run_local.sh
 Se añadieron READMEs y colecciones de users/authors/pedidos/pagos, refresh en Postman login, documentación raíz/deploy y script TLS. Books usa gunicorn en la unit nueva. La ejecución en VM y su evidencia siguen pendientes. La copia externa conserva archivos antiguos y `auth-service` histórico; no elimina material del destino.
 
 Validación de esta continuación: 67 tests de books pasaron con Python 3.12 en `.venv-check`; JSON de las cinco colecciones válido y rutas de los cuatro servicios contrastadas con el código. `bash -n` pasó para TLS y setup_microservices; `git diff --check` sin errores. TLS/nginx/systemd no se han ejecutado en la VM y no se volvió a ejecutar e2e Docker.
+
+## App Python Tk (2026-10-06)
+
+La app de escritorio (`Desktop\AppPythonTkpps\Python_app`, copia en `Entrega_Python_TK`; no está en este repositorio) ya consume los 6 microservicios:
+pestañas CRUD de Autores, Usuarios, Pedidos y Pagos, reloj y renovación automática del JWT, semáforos por servicio y Redis,
+y bitácora HTTP. `tests/gui_integration.py` maneja la GUI real contra los servicios (59 comprobaciones OK, incluida la fase de Redis caído).
+Para probar en local sin la VM: `PG_PORT=55432 DEMO_PW_FILE=pw.txt bash e2e/serve_local.sh` (puertos 15000-15005, usuarios demo-admin/staff/customer@example.com)
+y `bash e2e/serve_local.sh stop`.
+
+Pendiente: reflexión, animación (Ubiquitous), evidencias Postman/curl y capturas de la app contra la VM.

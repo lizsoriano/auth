@@ -1,17 +1,18 @@
 #!/bin/bash
 # Dentro del contenedor: arranca los 6 servicios (python app.py) con su propio rol de BD y el MISMO JWT/Redis.
+# Variable opcional BIND: 0.0.0.0 para publicar los puertos fuera del contenedor (lo usa e2e/serve_local.sh).
 # Variables que debe traer el entorno: PGHOST_PORT (host:puerto de PostgreSQL), REDIS_URL, JWT_SECRET_KEY,
 # y las contraseñas de los roles: PW_login PW_soap PW_users PW_authors PW_pedidos PW_pagos.
 set -eu
 DB=${DB:-library_db}
-COMMON="JWT_SECRET_KEY=$JWT_SECRET_KEY REDIS_URL=$REDIS_URL CACHE_TTL_SECONDS=60 LOG_LEVEL=INFO FLASK_HOST=127.0.0.1"
+COMMON="JWT_SECRET_KEY=$JWT_SECRET_KEY REDIS_URL=$REDIS_URL CACHE_TTL_SECONDS=60 LOG_LEVEL=INFO FLASK_HOST=${BIND:-127.0.0.1}"
 run() { # run NOMBRE DIRECTORIO VARIABLES...
   local name=$1 dir=$2; shift 2
   (cd "/work/$dir" && env $COMMON "$@" python app.py > "/tmp/$name.log" 2>&1 &)
 }
 run login   login   FLASK_PORT=5000 FLASK_SECRET_KEY=e2e-flask-secret-0123456789abcdef EMAIL_CONFIRMATION_REQUIRED=false \
     BCRYPT_ROUNDS=4 DATABASE_URL="postgresql://login_service_user:$PW_login@$PGHOST_PORT/$DB"
-run soap    soap    SOAP_PORT=5001 SOAP_HOST=127.0.0.1 FLASK_ENV=production \
+run soap    soap    SOAP_PORT=5001 SOAP_HOST=${BIND:-127.0.0.1} FLASK_ENV=production \
     DATABASE_URL="postgresql://soap_service_user:$PW_soap@$PGHOST_PORT/$DB"
 for s in users:5002 authors:5003 pedidos:5004 pagos:5005; do
   name=${s%%:*}; port=${s##*:}
