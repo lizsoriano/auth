@@ -34,7 +34,7 @@ except ValueError:
     sys.exit()
 def cut(x):
     if isinstance(x, dict):
-        return {k: cut(v) for k, v in x.items()}
+        return {k: cut(v) for k, v in x.items() if v is not None}
     if isinstance(x, list):
         out = [cut(v) for v in x[:keep]]
         return out + ([f"... ({len(x) - keep} más)"] if len(x) > keep else [])
@@ -69,7 +69,7 @@ jget() { "$PY" "$T/jget.py" "$T/body" "$1"; }
 cap() {
   echo
   if [ -t 1 ] && [ "${NOCLEAR:-}" != 1 ]; then printf '\033[2J\033[H'; fi
-  echo "════════════════ CAPTURA $1 · $2 ════════════════"
+  echo "================ CAPTURA $1 - $2 ================"
   [ -n "${3:-}" ] && echo "$3"
 }
 pause() { if [ -t 0 ] && [ "${NOPAUSE:-}" != 1 ]; then echo; read -r -p "── Toma la captura y pulsa Enter para continuar ── " _; fi; }
@@ -80,14 +80,14 @@ call() {  # call MÉTODO URL [TOKEN] [CUERPO_JSON] [ENCABEZADO_EXTRA] [FILAS_A_M
   [ -n "$token" ] && args+=(-H "Authorization: Bearer $token")
   [ -n "$extra" ] && args+=(-H "$extra")
   [ -n "$body" ] && args+=(-H "Content-Type: application/json" -d "$body")
-  echo; echo "▶ curl -X $method $url"
+  echo; echo "--> curl -X $method $url"
   [ -n "$token" ] && echo "    -H \"Authorization: Bearer ${token:0:20}...(recortado)\""
   [ -n "$extra" ] && echo "    -H \"$extra\""
   [ -n "$body" ] && echo "    -d '$(printf '%s' "${body//$DEMO_PASSWORD/********}" | sed -E 's/("refresh_token":")([^"]{8})[^"]*/...(recortado)/')'"
   local t; t=$(curl "${args[@]}" "$url${sep}format=json")
   STATUS=$(head -1 "$T/head" | tr -d '\r' | cut -d' ' -f2-)
   MS=$("$PY" -c "print(round(float('${t:-0}')*1000))")
-  echo "◀ HTTP $STATUS   ($MS ms)"
+  echo "<-- HTTP $STATUS   ($MS ms)"
   grep -i -E '^(idempotent-replay|cache-control):' "$T/head" | tr -d '\r' | sed 's/^/    /'
   "$PY" "$T/fmt.py" "$T/body" "$keep"
 }
