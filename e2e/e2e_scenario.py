@@ -114,8 +114,9 @@ def phase_a():
     check(pyjwt.get_unverified_header(body["token"])["alg"] == "HS256", "algoritmo HS256")
     rd = r()
     check(len(list(rd.scan_iter("session:*"))) >= 1 and len(list(rd.scan_iter("refresh:*"))) >= 1, "Redis tiene session:* y refresh:*")
-    key = next(rd.scan_iter("session:*"))
-    check(1500 < rd.ttl(key) <= 1800, f"la sesión tiene TTL ~30 min ({rd.ttl(key)} s)")
+    # Puede haber sesiones viejas de otras corridas/usuarios: la recién creada es la de mayor TTL restante.
+    newest_ttl = max(rd.ttl(k) for k in rd.scan_iter("session:*"))
+    check(1700 < newest_ttl <= 1800, f"la sesión tiene TTL ~30 min ({newest_ttl} s)")
     A = bearer(body["token"])
     s_staff, rs = login(staff)
     S = bearer(j(rs)["token"])
