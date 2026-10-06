@@ -6,7 +6,7 @@ Wants=redis.service
 [Service]
 User=rutil
 WorkingDirectory=/opt/auth/services/users
-ExecStart=/opt/auth/services/users/.venv/bin/gunicorn -w 2 -b 127.0.0.1:5002 app:app
+ExecStart=/opt/auth/services/users/.venv/bin/gunicorn -w 1 --threads 4 -b 127.0.0.1:5002 app:app
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true

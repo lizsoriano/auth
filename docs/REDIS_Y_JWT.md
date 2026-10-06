@@ -72,6 +72,7 @@ Reusar la clave con otro cuerpo → 409 (huella distinta).
 
 ## 5. Observabilidad y seguridad transversal
 
+- **Un solo proceso por servicio:** cada unidad de systemd corre `gunicorn -w 1 --threads 4`. Los contadores de `/metrics` viven en la memoria del proceso; con 2 procesos cada uno contaba solo lo suyo y `/metrics` podía mostrar 0 aunque el otro proceso sí hubiera rechazado tokens. Los hilos dan concurrencia (cada consulta abre su propia conexión a PostgreSQL y el cliente de Redis usa un pool, así que es seguro).
 - `GET /health` (incluye Redis y PostgreSQL) y `GET /metrics` (texto estilo Prometheus, solo admin): aciertos/fallos de caché,
   errores de Redis, tokens rechazados/revocados.
 - `CORS_ORIGINS` explícito en cada servicio (vacío = ningún origen). Respuestas autenticadas con `Cache-Control: no-store`.
