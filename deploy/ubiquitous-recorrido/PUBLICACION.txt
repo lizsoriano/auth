@@ -1,0 +1,16 @@
+Publicación en ubiquitous
+
+Archivos a subir (carpeta parcial2 de la cuenta iac-637044, junto a Aplicacion.html; no reemplazar Aplicacion.html):
+  1. arquitectura-animada.html  -> animación interactiva (un solo archivo, sin dependencias, sin Node/Electron/backend).
+  2. reflexion.md               -> reflexión de Ruth: por qué Redis en los microservicios, qué endpoints llevan Redis y JWT, y cómo implementarlo.
+
+La animación muestra cliente (Python_app, Electron_app o web-monolito), Nginx, los 6 microservicios, Redis (HIT/MISS) y PostgreSQL,
+con una etiqueta de JWT en cada paso. La misma reflexión también aparece al final de la animación ("Leer mi reflexión").
+
+recorrido.html, recorrido.css, recorrido.js, recorrido-animation.css y recorrido-animation.js son la versión anterior del recorrido; no son necesarios.
+
+URL esperada tras la carga: https://ubiquitous.udem.edu/~iac-637044/parcial2/arquitectura-animada.html
+La URL es un destino propuesto, no una confirmación de publicación.
+
+Después de subir: abrir la URL por HTTPS y comprobar el mapa, los casos, los controles y la reflexión. Verificar también en móvil.
+Nunca subir .env, secretos JWT, credenciales Redis, cookies, claves SSH ni datos de usuarios.
