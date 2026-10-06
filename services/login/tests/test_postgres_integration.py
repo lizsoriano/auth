@@ -38,12 +38,17 @@ def mailer():
 
 
 @pytest.fixture
-def pg_client(mailer):
+def pg_client(mailer, redis_server):
+    """PostgreSQL REAL; Redis simulado (fixtures `redis_server`/`redis_raw` de conftest.py). La autoridad de la
+    sesión vive en Redis y se prueba a fondo en test_redis_sessions.py."""
+    import fakeredis
+    from library_common import RedisLayer
     from login_service import Settings, create_app
     settings = Settings(secret_key="integration-secret-0123456789", database_url=DSN, bcrypt_rounds=4,
                         mail_from="Library <no-reply@example.com>", email_confirmation_required=True,
-                        jwt_secret="test-jwt-secret-0123456789")
-    return create_app(settings, mailer=mailer).test_client()
+                        jwt_secret_key="test-jwt-secret-key-0123456789abcdef")
+    layer = RedisLayer(fakeredis.FakeRedis(server=redis_server, decode_responses=True))
+    return create_app(settings, mailer=mailer, redis_layer=layer).test_client()
 
 
 @pytest.fixture
@@ -111,12 +116,21 @@ def test_token_is_stored_hashed_and_expired_token_is_410(pg_client, person, mail
     assert pg_client.get(f"/verify/{mailer.token}?format=json").status_code == 200
 
 
-def test_expired_session_reported_from_postgres(pg_client, person, mailer):
+def test_expired_session_reported_from_postgres(pg_client, person, mailer, redis_raw):
     pg_client.post("/register?format=json", json=person)
     pg_client.get(f"/verify/{mailer.token}?format=json")
     pg_client.post("/login?format=json", json={"email": person["email"], "password": person["password"]})
-    admin_update("update login_sessions set created_at = now() - interval '31 minutes', "
-                 "expires_at = now() - interval '1 minute' where user_id = (select user_id from users where email = %s)",
-                 (person["email"],))
+    # La sesión caduca en Redis (TTL de 30 min): la clave desaparece y la fila de PostgreSQL NO está revocada.
+    for key in redis_raw.scan_iter("session:*"):
+        redis_raw.delete(key)
     r = pg_client.get("/session?format=json")
     assert r.status_code == 401 and js(r)["error"]["code"] == "session_expired"
+
+
+def test_login_returns_role_and_tokens_from_real_users_table(pg_client, person, mailer):
+    """users.role_id existe (migración 006) y login_service_user puede leerlo."""
+    pg_client.post("/register?format=json", json=person)
+    pg_client.get(f"/verify/{mailer.token}?format=json")
+    body = js(pg_client.post("/login?format=json", json={"email": person["email"], "password": person["password"]}))
+    assert body["user"]["role_id"] == 3 and body["user"]["role"] == "customer"
+    assert body["token"] and body["refresh_token"] and body["token_expires_in_seconds"] == 1200

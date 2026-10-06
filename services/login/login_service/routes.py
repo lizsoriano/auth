@@ -1,4 +1,5 @@
 from flask import Blueprint, current_app, request, session
+from library_common import RedisUnavailable
 
 from .auth import public_user
 from .errors import ApiError
@@ -76,7 +77,7 @@ def resend_verification():
 @api.post("/login")
 def login():
     service = _service()
-    user, session_id, expires_at, token = service.login(
+    result = service.login(
         _body(),
         previous_session_id=session.get("sid"),
         ip_address=request.remote_addr,
@@ -84,11 +85,20 @@ def login():
     )
     session.clear()
     session.permanent = True
-    session["sid"] = str(session_id)
-    info = {"expires_at": expires_at, "expires_in_seconds": service.settings.session_timeout_minutes * 60}
-    # "token": el JWT que el cliente debe reenviar como "Authorization: Bearer <token>"
-    # al microservicio books en sus operaciones de escritura (POST/PUT/PATCH/DELETE).
-    return render({"message": "Sesión iniciada", "user": user, "session": info, "token": token})
+    session["sid"] = str(result["session_id"])
+    info = {"expires_at": result["expires_at"], "expires_in_seconds": service.settings.session_timeout_minutes * 60}
+    # "token": JWT de 20 min que el cliente reenvía como "Authorization: Bearer <token>" a TODOS los
+    # servicios en POST/PUT/PATCH/DELETE. "refresh_token": de un solo uso, para pedir otro JWT con
+    # POST /token/refresh antes de que caduque.
+    return render({"message": "Sesión iniciada", "user": result["user"], "session": info, **result["tokens"]})
+
+
+@api.post("/token/refresh")
+def token_refresh():
+    result = _service().refresh(_body().get("refresh_token"))
+    info = result.pop("session")
+    return render({"message": "Token renovado. El refresh token anterior ya no sirve: usa el nuevo.",
+                   "session": info, **result})
 
 
 @api.post("/logout")
@@ -137,11 +147,20 @@ def health():
     if not status["schema"]:
         raise ApiError("schema_missing",
                        "PostgreSQL responde pero faltan las tablas del servicio (aplica data/001_login_schema.sql)", 503)
-    return render({"status": "ok", "service": "login", "database": "connected", "schema": "ok"})
+    # Sin Redis no hay sesiones ni refresh ni revocación de JWT: el servicio no está listo.
+    if not current_app.extensions["redis"].ping():
+        raise ApiError("redis_unavailable", "El servicio está activo pero Redis no está disponible", 503)
+    return render({"status": "ok", "service": "login", "database": "connected", "schema": "ok", "redis": "ok"})
 
 
 def register_error_handlers(app):
     from werkzeug.exceptions import HTTPException
+
+    @app.errorhandler(RedisUnavailable)
+    def _redis_unavailable(exc):
+        # Falla cerrado: sin Redis no se puede verificar ni emitir sesión, así que se deniega.
+        return render(error_payload("redis_unavailable",
+                                    "No se puede verificar la sesión en este momento. Intenta de nuevo en unos segundos."), 503)
 
     @app.errorhandler(ApiError)
     def _api_error(exc):

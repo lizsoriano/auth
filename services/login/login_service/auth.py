@@ -11,8 +11,8 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import jwt as pyjwt
 from email_validator import EmailNotValidError, validate_email
+from library_common import ROLE_NAMES, RedisUnavailable, issue_access_token
 
 from . import passwords
 from .errors import ApiError, EmailAlreadyExists
@@ -45,16 +45,19 @@ def public_user(row):
         "display_name": row["display_name"],
         "email": row["email"],
         "email_verified": row.get("email_verified_at") is not None,
+        "role_id": row.get("role_id"),
+        "role": ROLE_NAMES.get(row.get("role_id"), "unknown"),
         "created_at": row["created_at"],
     }
 
 
 class AuthService:
-    def __init__(self, repository, settings, clock=utcnow, mailer=None):
+    def __init__(self, repository, settings, clock=utcnow, mailer=None, redis_layer=None):
         self.repo = repository
         self.settings = settings
         self.clock = clock
         self.mailer = mailer
+        self.redis = redis_layer
         # Hash ficticio para que un email inexistente cueste lo mismo que uno real.
         self._dummy_hash = passwords.hash_password(uuid.uuid4().hex, settings.bcrypt_rounds)
 
@@ -168,6 +171,14 @@ class AuthService:
         return checked.normalized.lower()
 
     # ------------------------------------------------------------------- login
+    @property
+    def _session_ttl_seconds(self):
+        return self.settings.session_timeout_minutes * 60
+
+    @property
+    def _refresh_ttl_seconds(self):
+        return self.settings.refresh_token_ttl_hours * 3600
+
     def login(self, data, previous_session_id=None, ip_address=None, user_agent=None):
         email, password = data.get("email"), data.get("password")
         if not isinstance(email, str) or not email.strip() or not isinstance(password, str) or not password:
@@ -185,27 +196,40 @@ class AuthService:
 
         now = self.clock()
         if previous_session_id:
-            self._revoke_quietly(previous_session_id, now)
+            self._end_session(previous_session_id, now)
         session_id = uuid.uuid4()
         expires_at = now + timedelta(minutes=self.settings.session_timeout_minutes)
         self.repo.start_session(user["user_id"], session_id, now, expires_at, self._clean_ip(ip_address),
                                 (user_agent or "")[:400] or None)
-        token = self._issue_jwt(user, now)
-        return public_user(user), session_id, expires_at, token
+        try:
+            tokens = self._open_tokens(user, session_id, now, now, expires_at)
+        except RedisUnavailable:
+            # Sin Redis no hay sesión válida: no se deja viva la fila de auditoría.
+            self._revoke_quietly(session_id, now)
+            raise
+        return {"user": public_user(user), "session_id": session_id, "expires_at": expires_at, "tokens": tokens}
 
-    def _issue_jwt(self, user, now):
-        """JWT para que el microservicio books autorice escrituras (POST/PUT/
-        PATCH/DELETE /books). Independiente de la sesión de Flask de arriba:
-        esta última sigue controlando /session, /logout, /profile, etc.
-        `role` no existe como columna propia -- se deriva de `is_admin`, que
-        es lo que ya tenemos para distinguir privilegios en este proyecto."""
-        payload = {
-            "sub": str(user["user_id"]),
-            "role": "admin" if user.get("is_admin") else "user",
-            "iat": now,
-            "exp": now + timedelta(hours=self.settings.jwt_expiration_hours),
-        }
-        return pyjwt.encode(payload, self.settings.jwt_secret, algorithm="HS256")
+    def _new_refresh_token(self):
+        token = secrets.token_urlsafe(32)
+        return token, self._hash_token(token)
+
+    def _open_tokens(self, user, session_id, now, created_at, expires_at):
+        """Emite el JWT de acceso (20 min) y el refresh token, y guarda sesión + refresh en Redis con TTL.
+
+        En Redis solo se guarda el SHA-256 del refresh token; el token en claro solo lo ve el cliente.
+        """
+        access, claims = issue_access_token(
+            secret_key=self.settings.jwt_secret_key, issuer=self.settings.jwt_issuer, user_id=user["user_id"],
+            role_id=user["role_id"], now=now, ttl_minutes=self.settings.jwt_expiration_minutes)
+        refresh, refresh_hash = self._new_refresh_token()
+        self.redis.session_put(str(session_id), {
+            "user_id": user["user_id"], "jti": claims["jti"], "jwt_exp": claims["exp"],
+            "refresh_hash": refresh_hash, "created_at": created_at.isoformat(), "expires_at": expires_at.isoformat(),
+        }, self._session_ttl_seconds)
+        self.redis.refresh_put(refresh_hash, {"user_id": user["user_id"], "sid": str(session_id)},
+                               self._refresh_ttl_seconds)
+        return {"token": access, "token_type": "Bearer", "token_expires_in_seconds": claims["exp"] - claims["iat"],
+                "refresh_token": refresh}
 
     @staticmethod
     def _clean_ip(value):
@@ -215,18 +239,33 @@ class AuthService:
             return None
 
     # ----------------------------------------------------------------- sesión
+    def _expired(self, data, now):
+        """La sesión caduca por inactividad (expires_at, deslizante) o al llegar al tope absoluto del refresh."""
+        expires_at = datetime.fromisoformat(data["expires_at"])
+        created_at = datetime.fromisoformat(data["created_at"])
+        return expires_at <= now or created_at + timedelta(hours=self.settings.refresh_token_ttl_hours) <= now
+
     def resolve_session(self, session_id):
-        """Devuelve (estado, fila). estado: 'active' | 'expired' | 'missing'."""
+        """Devuelve (estado, fila). estado: 'active' | 'expired' | 'missing'.
+
+        Redis es la autoridad de la validez; la fila de PostgreSQL aporta los datos del usuario y distingue
+        «caducada» (fila sin revocar) de «nunca inició / cerró sesión» (fila revocada). Si Redis no responde
+        lanza RedisUnavailable (503): nunca se da por válida una sesión que no se pudo comprobar.
+        """
         if not session_id:
             return "missing", None
         try:
             uuid.UUID(str(session_id))
         except ValueError:
             return "missing", None
+        data = self.redis.session_get(str(session_id))
         row = self.repo.get_session(session_id)
         if not row or row["revoked_at"] is not None or not row["is_active"]:
             return "missing", None
-        if row["expires_at"] <= self.clock():
+        if data is None:  # el TTL de Redis venció (o se borró) y la fila no se revocó
+            return "expired", row
+        row = {**row, "expires_at": datetime.fromisoformat(data["expires_at"])}
+        if self._expired(data, self.clock()):
             return "expired", row
         return "active", row
 
@@ -234,10 +273,29 @@ class AuthService:
         remaining = int((row["expires_at"] - self.clock()).total_seconds())
         return {"expires_at": row["expires_at"], "expires_in_seconds": max(remaining, 0)}
 
+    def _revoke_jwt(self, data, when):
+        """Mete el jti en la lista de revocación hasta el momento en que el token habría expirado."""
+        remaining = int(data["jwt_exp"] - when.timestamp())
+        if remaining > 0:
+            self.redis.revoke_jti(data["jti"], remaining)
+
+    def _end_session(self, session_id, when):
+        """Cierra la sesión de verdad: revoca el JWT, borra refresh y sesión de Redis y marca la fila de auditoría."""
+        try:
+            uuid.UUID(str(session_id))
+        except ValueError:
+            return
+        data = self.redis.session_get(str(session_id))
+        if data:
+            self._revoke_jwt(data, when)
+            self.redis.refresh_delete(data["refresh_hash"])
+            self.redis.session_delete(str(session_id))
+        self.repo.revoke_session(session_id, when)
+
     def logout(self, session_id):
         state, _ = self.resolve_session(session_id)
-        if state == "active":
-            self.repo.revoke_session(session_id, self.clock())
+        if state in ("active", "expired"):
+            self._end_session(session_id, self.clock())
         return state
 
     def _revoke_quietly(self, session_id, when):
@@ -248,7 +306,7 @@ class AuthService:
         self.repo.revoke_session(session_id, when)
 
     def extend_session(self, session_id):
-        """POST /session/extend: renueva los 30 minutos desde ahora."""
+        """POST /session/extend: renueva los 30 minutos desde ahora (hasta el tope absoluto de la sesión)."""
         state, row = self.resolve_session(session_id)
         if state == "missing":
             raise ApiError("not_authenticated", "No hay una sesión autenticada", 401)
@@ -256,8 +314,51 @@ class AuthService:
             raise ApiError("session_expired", "La sesión caducó (30 minutos). Inicia sesión de nuevo", 401)
         now = self.clock()
         new_expiry = now + timedelta(minutes=self.settings.session_timeout_minutes)
+        self.redis.session_update(str(session_id), expires_at=new_expiry.isoformat())
+        self.redis.session_touch(str(session_id), self._session_ttl_seconds)
         self.repo.extend_session(session_id, new_expiry)
-        return {"expires_at": new_expiry, "expires_in_seconds": self.settings.session_timeout_minutes * 60}
+        return {"expires_at": new_expiry, "expires_in_seconds": self._session_ttl_seconds}
+
+    # ---------------------------------------------------- renovar el JWT (refresh)
+    def refresh(self, refresh_token):
+        """POST /token/refresh: cambia un refresh token por un JWT nuevo (20 min) y un refresh nuevo.
+
+        El refresh token es de UN SOLO USO (rotación): se consume al leerlo (GETDEL). El JWT anterior se
+        revoca de inmediato. Si la sesión ya se cerró o caducó, el refresh no sirve aunque siga en Redis.
+        """
+        invalid = ApiError("invalid_refresh_token",
+                           "El refresh token no es válido, ya se usó o la sesión caducó. Inicia sesión de nuevo con POST /login",
+                           401)
+        if not isinstance(refresh_token, str) or not TOKEN_RE.fullmatch(refresh_token):
+            raise invalid
+        old_hash = self._hash_token(refresh_token)
+        taken = self.redis.refresh_take(old_hash)
+        if not taken:
+            raise invalid
+        sid = taken["sid"]
+        session = self.redis.session_get(sid)
+        now = self.clock()
+        if not session or session["refresh_hash"] != old_hash or self._expired(session, now):
+            raise invalid
+        user = self.repo.get_user_by_id(taken["user_id"])
+        if not user or not user["is_active"]:
+            self._end_session(sid, now)
+            raise ApiError("account_disabled", "La cuenta está desactivada", 403)
+
+        access, claims = issue_access_token(
+            secret_key=self.settings.jwt_secret_key, issuer=self.settings.jwt_issuer, user_id=user["user_id"],
+            role_id=user["role_id"], now=now, ttl_minutes=self.settings.jwt_expiration_minutes)
+        refresh, new_hash = self._new_refresh_token()
+        expires_at = now + timedelta(minutes=self.settings.session_timeout_minutes)
+        self._revoke_jwt(session, now)
+        self.redis.refresh_put(new_hash, {"user_id": user["user_id"], "sid": sid}, self._refresh_ttl_seconds)
+        self.redis.session_update(sid, jti=claims["jti"], jwt_exp=claims["exp"], refresh_hash=new_hash,
+                                  expires_at=expires_at.isoformat())
+        self.redis.session_touch(sid, self._session_ttl_seconds)
+        self.repo.extend_session(sid, expires_at)
+        return {"token": access, "token_type": "Bearer", "token_expires_in_seconds": claims["exp"] - claims["iat"],
+                "refresh_token": refresh,
+                "session": {"expires_at": expires_at, "expires_in_seconds": self._session_ttl_seconds}}
 
     # ------------------------------------------------------------------ perfil
     def update_profile(self, session_id, data):

@@ -108,7 +108,13 @@ python3 -c "import secrets; print(secrets.token_hex(32))"   # pega el resultado 
 | `SESSION_COOKIE_SECURE` | `false` | Ponlo en `true` detrás de HTTPS. |
 | `BCRYPT_ROUNDS` | `12` | Costo de bcrypt (igual que el monolito). |
 | `EMAIL_CHECK_DELIVERABILITY` | `false` | `true` = además de validar el formato, consulta el DNS (MX) del dominio. |
-| `CORS_ORIGINS` | vacío | Orígenes permitidos, separados por coma (con credenciales). |
+| `CORS_ORIGINS` | vacío | Orígenes permitidos, separados por coma (con credenciales). Vacío = ninguno. |
+| `JWT_SECRET_KEY` | — (obligatoria, ≥32) | Secreto HS256. **Idéntico en los 6 servicios**; solo por entorno, nunca en el código. |
+| `JWT_ISSUER` | `library-login` | Claim `iss` que todos los servicios exigen. |
+| `JWT_EXPIRATION_MINUTES` | `20` | Vida del access token. |
+| `REFRESH_TOKEN_TTL_HOURS` | `24` | Vida máxima de la sesión (refresh token con rotación). |
+| `REDIS_URL` | — (obligatoria) | `redis://:CLAVE@127.0.0.1:6379/0` (la misma en los 6 servicios). |
+| `REDIS_CONNECT_TIMEOUT` / `REDIS_SOCKET_TIMEOUT` | `1.0` / `1.0` | Segundos; con Redis caído se responde 503 sin colgarse. |
 
 `.env` está en `.gitignore`: nunca lo subas.
 
@@ -242,8 +248,10 @@ Los cuerpos `POST` se envían como JSON (UTF-8).
 | POST | `/register` | Registra al usuario y envía el correo de confirmación | 201 · 400 · 409 |
 | GET | `/verify/<token>` | Confirma el correo (es el enlace del mensaje) | 200 · 404 · 410 |
 | POST | `/resend-verification` | Reenvía el enlace (máx. uno por minuto) | 202 · 400 |
-| POST | `/login` | Verifica credenciales, inicia sesión (30 min) y emite un JWT | 200 · 400 · 401 · 403 |
-| POST | `/logout` | Revoca la sesión | 200 · 401 |
+| POST | `/login` | Verifica credenciales, abre sesión (30 min deslizantes) y emite JWT (20 min) + refresh token | 200 · 400 · 401 · 403 · 503 |
+| POST | `/token/refresh` | Cambia un refresh token (un solo uso) por un JWT y un refresh nuevos, antes de que caduque | 200 · 400 · 401 · 503 |
+| POST | `/logout` | Cierra la sesión, borra el refresh token y **revoca el JWT** (`jwt:revoked:<jti>`) | 200 · 401 · 503 |
+| POST | `/session/extend` | Renueva la ventana de 30 min de la sesión | 200 · 401 · 503 |
 | GET | `/session` | Usuario autenticado y tiempo restante | 200 · 401 |
 | GET | `/health` | Servicio + PostgreSQL + esquema | 200 · 503 |
 | GET | `/docs/` · `/openapi.json` | Swagger UI / especificación | 200 |
@@ -252,27 +260,32 @@ Los cuerpos `POST` se envían como JSON (UTF-8).
 ≤ 72 bytes por el límite de bcrypt). El correo se valida (formato) antes de registrar y es único sin
 distinguir mayúsculas. La cuenta nueva nunca es administradora.
 
-### Autenticación JWT (para el microservicio books)
+### Autenticación JWT (todos los microservicios)
 
-Además de la cookie de sesión (que sigue controlando `/session`, `/logout`, `/profile`, etc.),
-`POST /login` devuelve un **JWT** en el campo `token`:
+`POST /login` devuelve, además de la cookie de sesión, un **JWT de acceso** y un **refresh token**:
 
 ```json
-{ "message": "Sesión iniciada", "user": {...}, "session": {...},
-  "token": "eyJhbGciOiJIUzI1NiIs..." }
+{ "message": "Sesión iniciada", "user": {"id": 7, "role_id": 3, "role": "customer", ...}, "session": {...},
+  "token": "eyJhbGciOiJIUzI1NiIs...", "token_type": "Bearer", "token_expires_in_seconds": 1200,
+  "refresh_token": "u3Q...opaco" }
 ```
 
-El cliente debe reenviar ese token como `Authorization: Bearer <token>` al llamar a las
-operaciones de escritura de `services/soap` (`POST`/`PUT`/`PATCH`/`DELETE /books`), que lo
-validan — ver [`../soap/README.md`](../soap/README.md#autenticación-jwt-para-escrituras). Las
-lecturas del catálogo (`GET /books`) no lo necesitan.
+El cliente reenvía `Authorization: Bearer <token>` en **POST/PUT/PATCH/DELETE** de books, authors, users,
+pedidos y pagos (los GET públicos no lo piden). Detalle completo en [`../../docs/REDIS_Y_JWT.md`](../../docs/REDIS_Y_JWT.md).
 
-- **Firma:** HS256, con `JWT_SECRET` (variable de entorno; **debe ser idéntica** en `services/login`
-  y `services/soap` — es un secreto compartido, no se guarda en la base de datos).
-- **Contenido:** `sub` (id del usuario), `role` (`"admin"` o `"user"`, según `users.is_admin`),
-  `iat`, `exp` (vigencia: `JWT_EXPIRATION_HOURS`, 2 horas por defecto — independiente de los 30
-  minutos de la sesión por cookie).
-- **Credenciales incorrectas:** `401`, sin `token` en la respuesta.
+- **Firma:** HS256 con `JWT_SECRET_KEY` (variable de entorno, idéntica en los 6 servicios; nunca en el código).
+  Los servicios fijan `algorithms=["HS256"]` (rechazan `alg=none`) y validan firma, `exp`, `iat`, `iss`, `jti`,
+  `user_id` y `role_id`.
+- **Contenido:** `iss`, `sub`, `user_id`, `role_id` (1 admin · 2 staff · 3 customer), `role`, `iat`, `exp`
+  (20 min) y `jti` (único; sirve para revocarlo).
+- **Renovación:** antes de los 20 min, `POST /token/refresh` con `{"refresh_token": "..."}`. El refresh es opaco,
+  de un solo uso (rotación) y solo se guarda su SHA-256 en Redis; reutilizar uno ya cambiado → `401`.
+  La sesión no puede pasar de `REFRESH_TOKEN_TTL_HOURS` (24 h) aunque se siga renovando.
+- **Cierre:** `POST /logout` revoca el `jti` por lo que le quede de vida; el mismo token da `401` en cualquier servicio.
+- **Redis es la autoridad de la sesión**: si no responde, `login`, `refresh`, `logout` y `extend` devuelven `503`
+  (fallan cerrados); PostgreSQL conserva el registro de auditoría (`login_sessions`).
+- **Rol:** sale de `users.role_id`; un cambio de rol o desactivación se refleja en el siguiente refresh/login (≤ 20 min).
+- **Credenciales incorrectas:** `401`, sin `token` en la respuesta. Ni contraseñas ni tokens se escriben en logs.
 
 ### Flujo de confirmación
 
@@ -413,7 +426,7 @@ Por consola: `newman run postman/login-service.postman_collection.json --env-var
   `email_verified_at`, y operar sobre `login_sessions` y `email_verifications`. **No** puede crear
   administradores, borrar, ni leer books/catálogo (verificado).
 - Cookie `HttpOnly`, `SameSite=Lax`; respuestas con `Cache-Control: no-store`; los errores nunca filtran detalles internos.
-- **No implementado (extensiones futuras)**: captcha, límite de intentos de login (rate limiting), JWT y Redis.
+- **No implementado (extensiones futuras)**: captcha y límite de intentos de login (rate limiting). JWT y Redis ya están (ver arriba).
   La estructura (`auth.py` sin dependencias de Flask/SQL, `repository.py` y `mailer.py` aislados) permite añadirlos
   sin reescribir los endpoints.
 - Sin borrado de filas vencidas: `login_sessions` y `email_verifications` crecen; programa una limpieza periódica

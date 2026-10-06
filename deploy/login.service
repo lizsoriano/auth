@@ -1,7 +1,7 @@
 [Unit]
 Description=Library login service (Flask + gunicorn, puerto 5000)
-After=network.target postgresql.service postfix.service
-Wants=postfix.service
+After=network.target postgresql.service redis.service postfix.service
+Wants=redis.service postfix.service
 
 [Service]
 User=rutil
@@ -9,6 +9,8 @@ WorkingDirectory=/opt/auth/services/login
 ExecStart=/opt/auth/services/login/.venv/bin/gunicorn -w 2 -b 127.0.0.1:5000 app:app
 Restart=on-failure
 RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

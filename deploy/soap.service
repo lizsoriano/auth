@@ -1,6 +1,7 @@
 [Unit]
 Description=Library SOAP service (Flask dev server, puerto 5001, loopback)
-After=network.target postgresql.service
+After=network.target postgresql.service redis.service
+Wants=redis.service
 
 [Service]
 User=rutil
@@ -9,6 +10,8 @@ Environment=SOAP_PORT=5001
 ExecStart=/opt/library_soap_service/.venv/bin/python /opt/library_soap_service/app.py
 Restart=on-failure
 RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

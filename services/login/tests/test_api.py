@@ -182,7 +182,7 @@ def test_monolith_account_can_log_in(client, repo):
     legacy = bcrypt.hashpw(b"CambieEstaClave123!", bcrypt.gensalt(4)).decode().replace("$2b$", "$2a$", 1)
     repo.users["admin@example.com"] = dict(user_id=7, nombre=None, apellido_paterno=None, apellido_materno=None,
                                            display_name="Administrador", email="admin@example.com",
-                                           password_hash=legacy, is_active=True,
+                                           password_hash=legacy, is_active=True, role_id=3,
                                            created_at=datetime(2026, 9, 1, tzinfo=timezone.utc))
     r = client.post("/login?format=json", json={"email": "Admin@Example.com", "password": "CambieEstaClave123!"})
     assert r.status_code == 200
@@ -287,7 +287,8 @@ def test_cookie_flags_and_no_store(client, registered):
 
 # --------------------------------------------------------------- health
 def test_health_ok(client):
-    assert js(client.get("/health?format=json")) == {"status": "ok", "service": "login", "database": "connected", "schema": "ok"}
+    assert js(client.get("/health?format=json")) == {"status": "ok", "service": "login", "database": "connected",
+                                                     "schema": "ok", "redis": "ok"}
     assert xml(client.get("/health")).findtext("status") == "ok"
 
 
@@ -309,7 +310,7 @@ def test_openapi_documents_every_endpoint_in_xml_and_json(client):
     spec = js(client.get("/openapi.json"))
     assert spec["openapi"].startswith("3.")
     expected = {"/register": "post", "/login": "post", "/logout": "post", "/session": "get", "/health": "get",
-                "/verify/{token}": "get", "/resend-verification": "post"}
+                "/verify/{token}": "get", "/resend-verification": "post", "/token/refresh": "post"}
     for path, method in expected.items():
         op = spec["paths"][path][method]
         ok = next(r for code, r in op["responses"].items() if code.startswith("2"))

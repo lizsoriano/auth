@@ -2,13 +2,18 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import fakeredis
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))  # library_common (paquete compartido)
 
+from library_common import Metrics, RedisLayer  # noqa: E402
 from login_service import Settings, create_app  # noqa: E402
 from login_service.errors import EmailAlreadyExists  # noqa: E402
 from login_service.mailer import MailError  # noqa: E402
+
+JWT_SECRET = "test-jwt-secret-key-0123456789abcdef"  # 36 caracteres (mínimo 32)
 
 
 class FakeClock:
@@ -35,8 +40,8 @@ class MemoryRepository:
             raise EmailAlreadyExists(email)
         row = dict(user_id=len(self.users) + 1, nombre=nombre, apellido_paterno=apellido_paterno,
                    apellido_materno=apellido_materno, display_name=display_name, email=email,
-                   password_hash=password_hash, is_active=True, is_admin=False, email_verified_at=email_verified_at,
-                   created_at=datetime(2026, 9, 18, tzinfo=timezone.utc))
+                   password_hash=password_hash, is_active=True, is_admin=False, role_id=3,
+                   email_verified_at=email_verified_at, created_at=datetime(2026, 9, 18, tzinfo=timezone.utc))
         self.users[email] = row
         if verification:
             self.create_verification(row["user_id"], *verification)
@@ -69,6 +74,10 @@ class MemoryRepository:
     def get_user_by_email(self, email):
         return dict(self.users[email]) if email in self.users else None
 
+    def get_user_by_id(self, user_id):
+        u = next((u for u in self.users.values() if u["user_id"] == user_id), None)
+        return {k: v for k, v in u.items() if k != "password_hash"} if u else None
+
     def start_session(self, user_id, session_id, created_at, expires_at, ip_address, user_agent):
         self.sessions[str(session_id)] = dict(session_id=session_id, user_id=user_id, expires_at=expires_at,
                                               revoked_at=None, ip=ip_address, ua=user_agent)
@@ -84,6 +93,21 @@ class MemoryRepository:
         s = self.sessions.get(str(session_id))
         if s and s["revoked_at"] is None:
             s["revoked_at"] = when
+
+    def extend_session(self, session_id, new_expires_at):
+        s = self.sessions.get(str(session_id))
+        if s and s["revoked_at"] is None:
+            s["expires_at"] = new_expires_at
+
+    def update_profile(self, user_id, fields):
+        user = next(u for u in self.users.values() if u["user_id"] == user_id)
+        if "email" in fields and fields["email"] != user["email"] and fields["email"] in self.users:
+            raise EmailAlreadyExists(fields["email"])
+        old_email = user["email"]
+        user.update(fields)
+        if user["email"] != old_email:
+            self.users[user["email"]] = self.users.pop(old_email)
+        return {k: v for k, v in user.items() if k != "password_hash"}
 
     def ping(self):
         if not self.up:
@@ -123,11 +147,40 @@ def mailer():
 
 
 @pytest.fixture
-def app(repo, clock, mailer):
+def redis_server():
+    return fakeredis.FakeServer()
+
+
+@pytest.fixture
+def redis_raw(redis_server):
+    """Cliente directo al mismo Redis falso, para inspeccionar claves y TTL."""
+    return fakeredis.FakeRedis(server=redis_server, decode_responses=True)
+
+
+@pytest.fixture
+def redis_down(redis_server):
+    """Simula que Redis dejó de responder: cada comando lanza ConnectionError."""
+    redis_server.connected = False
+    yield
+    redis_server.connected = True
+
+
+@pytest.fixture
+def metrics():
+    return Metrics("login")
+
+
+@pytest.fixture
+def redis_layer(redis_server, metrics):
+    return RedisLayer(fakeredis.FakeRedis(server=redis_server, decode_responses=True), metrics)
+
+
+@pytest.fixture
+def app(repo, clock, mailer, redis_layer, metrics):
     """Sesión/registro sin confirmación de correo (la confirmación se prueba en test_email_confirmation.py)."""
     settings = Settings(secret_key="test-secret-key-0123456789", session_timeout_minutes=30, bcrypt_rounds=4,
-                        email_confirmation_required=False, jwt_secret="test-jwt-secret-0123456789")
-    return create_app(settings, repository=repo, clock=clock, mailer=mailer)
+                        email_confirmation_required=False, jwt_secret_key=JWT_SECRET)
+    return create_app(settings, repository=repo, clock=clock, mailer=mailer, redis_layer=redis_layer, metrics=metrics)
 
 
 @pytest.fixture
@@ -135,13 +188,13 @@ def cm_settings():
     return Settings(secret_key="test-secret-key-0123456789", session_timeout_minutes=30, bcrypt_rounds=4,
                     email_confirmation_required=True, mail_from="Library <no-reply@example.com>",
                     public_base_url="http://vm.example:5000", email_token_ttl_hours=24, resend_cooldown_seconds=60,
-                    jwt_secret="test-jwt-secret-0123456789")
+                    jwt_secret_key=JWT_SECRET)
 
 
 @pytest.fixture
-def cm_client(cm_settings, repo, clock, mailer):
+def cm_client(cm_settings, repo, clock, mailer, redis_layer):
     """Cliente con la confirmación por correo (Postfix) ACTIVADA, como en producción."""
-    return create_app(cm_settings, repository=repo, clock=clock, mailer=mailer).test_client()
+    return create_app(cm_settings, repository=repo, clock=clock, mailer=mailer, redis_layer=redis_layer).test_client()
 
 
 @pytest.fixture

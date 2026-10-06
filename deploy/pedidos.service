@@ -1,0 +1,16 @@
+[Unit]
+Description=Library pedidos service (Flask + gunicorn, puerto 5004, loopback)
+After=network.target postgresql.service redis.service
+Wants=redis.service
+
+[Service]
+User=rutil
+WorkingDirectory=/opt/auth/services/pedidos
+ExecStart=/opt/auth/services/pedidos/.venv/bin/gunicorn -w 2 -b 127.0.0.1:5004 app:app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

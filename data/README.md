@@ -19,6 +19,15 @@ no se modifica la base "a mano".
 | 001 | `001_login_service.sql` | `library_user` (dueño) | 3 columnas nullable de nombre en `users`, `CHECK`, índice único `lower(email)` y tabla `login_sessions`. |
 | 002 | `002_login_email_verification.sql` | `library_user` | Columna `users.email_verified_at` y tabla `email_verifications` (confirmación del correo por Postfix). |
 | 003 | `003_login_service_grants.sql` | `library_user` | Mínimo privilegio por columna para `login_service_user`. **Siempre al final**; reemplaza al antiguo `002_login_service_grants.sql`. |
+| 004 | `004_login_profile_and_session_extend_grants.sql` | `library_user` | Permisos para `PATCH /profile` y `POST /session/extend`. |
+| 005 | `005_login_jwt_role_grant.sql` | `library_user` | `SELECT (is_admin)` para el claim `role` del JWT (lo reemplaza la 006). |
+| 006 | `006_roles.sql` | `library_user` | Tabla `roles` (1 admin, 2 staff, 3 customer), `users.role_id` (default 3), trigger `is_admin → role admin` y `SELECT (role_id)` para login. |
+| 007 | `007_service_db_roles.sql` | `postgres` | Crea los roles de BD `users_service_user`, `authors_service_user`, `pedidos_service_user` y `pagos_service_user` (4 contraseñas por `-v`, no viven en el repo). |
+| 008 | `008_users_authors_functions.sql` | `library_user` | Funciones `fn_users_*` y `fn_authors_*` (`SECURITY DEFINER`; solo `EXECUTE` para su rol). |
+| 009 | `009_pedidos.sql` | `library_user` | Tablas `order_statuses`, `orders`, `order_items`; `fn_pedidos_crear` descuenta el stock de forma atómica. |
+| 010 | `010_pagos.sql` | `library_user` | Tabla `payments`; `fn_pagos_registrar` registra el pago y pasa el pedido a «pagado» en una transacción, con idempotencia. |
+| 011 | `011_revoke_public_execute_books_functions.sql` | `postgres` | Quita `EXECUTE` a `PUBLIC` de las funciones de books/SOAP (ver «Hallazgo de seguridad»). |
+| 991–996 | `991_…` a `996_…` | ver cada archivo | Deshacen 011 → 006, **en orden numérico ascendente**, y siempre **antes** que 998/999. |
 | 998 | `998_rollback_002_login_email_verification.sql` | `library_user` | Deshace 002. Ejecutar **antes** que 999. |
 | 999 | `999_rollback_001_login_service.sql` | `library_user` | Deshace 001 (conserva a todos los usuarios). |
 
@@ -48,9 +57,62 @@ falla, no queda nada a medias.
 | 2026-09-18 | `users.email_verified_at` | `timestamptz DEFAULT CURRENT_TIMESTAMP`; `NULL` = correo sin confirmar | Ninguno: las cuentas existentes y las que cree el monolito quedan verificadas |
 | 2026-09-18 | `email_verifications` | Tabla nueva: tokens de confirmación (solo SHA-256), vigencia y uso; FK a `users` `ON DELETE CASCADE` | Ninguno |
 | 2026-09-18 | Rol `login_service_user` | Nuevo; permisos por columna solo sobre `users`, `login_sessions` y `email_verifications` | Ninguno: no recibe nada sobre books/catálogo |
+| 2026-10-06 | `roles` | Tabla nueva (1 admin, 2 staff, 3 customer) | Ninguno |
+| 2026-10-06 | `users.role_id` | `smallint NOT NULL DEFAULT 3` + FK a `roles` (*fast default*: no reescribe la tabla). **Único `UPDATE`**: el administrador del monolito (`is_admin`) pasa a `role_id = 1` | Ninguno: el monolito inserta sin `role_id` y nace `customer`; `is_admin` y el índice de un solo administrador no cambian |
+| 2026-10-06 | trigger `trg_users_admin_role` | Si se inserta/actualiza `is_admin = true`, el `role_id` pasa a 1 (solo se dispara al tocar `is_admin`) | El monolito sigue funcionando igual; su admin queda con rol admin |
+| 2026-10-06 | Roles `users_` / `authors_` / `pedidos_` / `pagos_service_user` | Nuevos; **ningún permiso sobre tablas**, solo `EXECUTE` en sus funciones | Ninguno |
+| 2026-10-06 | `fn_users_*`, `fn_authors_*` | Funciones nuevas (CRUD de usuarios y autores; protegen al último administrador) | Ninguno |
+| 2026-10-06 | `order_statuses`, `orders`, `order_items` | Tablas nuevas; `fn_pedidos_crear` baja `books.stock` con bloqueo de filas | `books.stock` cambia solo al crear/cancelar un pedido |
+| 2026-10-06 | `payments` | Tabla nueva con `idempotency_key` única y un pago por pedido | Ninguno |
+| 2026-10-06 | Funciones `fn_*` de books/SOAP | `REVOKE EXECUTE … FROM PUBLIC` y `GRANT` explícito a `soap_service_user` | Ninguno para books/Electron (salida idéntica); `login_service_user` y los roles nuevos ya no pueden llamarlas |
 
-**No se modificó** ninguna columna, constraint, índice, vista, función ni permiso existente, y no se ejecuta
-ningún `UPDATE` sobre filas existentes.
+**No se modificó** ninguna columna, constraint, índice, vista ni función existente. Las migraciones 001–005 no
+ejecutan ningún `UPDATE` sobre filas existentes; la 006 ejecuta exactamente uno (el administrador del monolito → `role_id = 1`).
+
+## Hallazgo de seguridad (migración 011)
+
+PostgreSQL concede `EXECUTE` a `PUBLIC` al crear una función. Las funciones `SECURITY DEFINER` de books
+(`fn_crear_libro`, `fn_actualizar_libro`, `fn_eliminar_libro`, `fn_registrar_clasificacion`…) nacieron así,
+de modo que **cualquier rol con acceso a la base** podía llamarlas. Se comprobó con una llamada real:
+`users_service_user` ejecutó `fn_eliminar_libro` con éxito, saltándose el JWT y los roles del servicio books.
+La migración 011 revoca `PUBLIC` y deja el permiso explícito para `soap_service_user`. Las funciones nuevas
+(008–010) ya nacen con `REVOKE ALL … FROM PUBLIC`. **Se corre como `postgres`**: las funciones de
+`soap_module.sql` las creó el superusuario y `library_user` no puede revocarlas (daría
+`no privileges could be revoked`).
+
+## Cómo se verificó 006–011
+
+En un PostgreSQL 16 real (Docker) con el esquema, los módulos de books/SOAP, el rol de login y datos de prueba:
+
+- `tests/verify_microservices_db.sql` (79 comprobaciones, todo dentro de una transacción con `ROLLBACK`):
+  roles y trigger, usuarios (incluye «no se puede quitar al último administrador»), autores y vínculos con libros,
+  pedidos (total, stock, stock insuficiente sin dejar nada a medias, ISBN inexistente, cantidades inválidas,
+  cancelar repone stock, un cliente no ve pedidos ajenos) y pagos (monto exacto, idempotencia, pedido ajeno,
+  pagar dos veces, enviar un pedido pagado).
+- **Concurrencia:** dos sesiones pidiendo las últimas 5 unidades a la vez → una crea el pedido, la otra espera
+  el bloqueo, ve stock 0 y es rechazada con `PD002`; stock final 0 y un solo pedido (sin sobreventa).
+- **Permisos por rol:** cada rol de servicio solo ejecuta sus funciones (users 7, authors 8, pedidos 5, pagos 4,
+  login 0) y recibe `permission denied` al leer/escribir cualquier tabla o al llamar funciones de otro servicio.
+- **books/SOAP:** `fn_listar_libros()`, `fn_libros_con_imagenes()` y `fn_conceptos_pendientes()` con
+  `soap_service_user` devuelven **exactamente lo mismo** antes, después de 006–011 y después de revertirlas.
+- **Rollback completo** (991→996): `users` vuelve a sus 12 columnas, no queda ninguna tabla/función/rol nuevo, los
+  usuarios siguen intactos y el stock reservado por un pedido pendiente se repone. Re-aplicar todo después funciona.
+- **Instalación limpia vs. migrada:** `schema.sql` y «esquema original + migraciones» producen definiciones idénticas
+  de `users`, `roles`, `orders`, `order_items`, `order_statuses` y `payments`.
+
+Instalación limpia: `schema.sql`, luego `007` (como `postgres`), `008`, `009`, `010` y `011` (como `postgres`);
+la `006` es idempotente y se puede omitir. Las funciones `fn_*` viven en las migraciones, no en `schema.sql`.
+
+```bash
+# aplicar 006-011 sobre una BD ya en marcha (desde la raíz del repo)
+export PGPASSWORD='<clave-de-library_user>'
+psql -h localhost -U library_user -d library_db -v ON_ERROR_STOP=1 -f data/migrations/006_roles.sql
+sudo -u postgres psql -d library_db -v users_password='…' -v authors_password='…' -v pedidos_password='…' -v pagos_password='…' -f data/migrations/007_service_db_roles.sql
+for f in 008_users_authors_functions 009_pedidos 010_pagos; do
+  psql -h localhost -U library_user -d library_db -v ON_ERROR_STOP=1 -f data/migrations/$f.sql
+done
+sudo -u postgres psql -d library_db -v ON_ERROR_STOP=1 -f data/migrations/011_revoke_public_execute_books_functions.sql
+```
 
 ## Por qué es seguro para books, Electron y el monolito
 

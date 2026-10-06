@@ -38,18 +38,19 @@ def test_register_sends_one_email_with_the_link(cm_client, mailer):
     assert len(mailer.last_token) >= 40                      # y el token no arrastra el ?format=
 
 
-def test_email_link_format_is_configurable(cm_settings, repo, clock, mailer):
+def test_email_link_format_is_configurable(cm_settings, repo, clock, mailer, redis_layer):
     from dataclasses import replace
     from login_service import create_app
     for fmt, suffix in (("xml", "?format=xml"), ("", "")):
         mailer.sent.clear()
         repo.users.clear()
-        app = create_app(replace(cm_settings, email_link_format=fmt), repository=repo, clock=clock, mailer=mailer)
+        app = create_app(replace(cm_settings, email_link_format=fmt), repository=repo, clock=clock, mailer=mailer,
+                         redis_layer=redis_layer)
         app.test_client().post("/register?format=json", json=PERSON)
         link = mailer.sent[-1]["link"]
         assert link.endswith(suffix) and (("?" in link) == bool(suffix))
     with pytest.raises(ConfigError, match="EMAIL_LINK_FORMAT"):
-        replace(cm_settings, email_link_format="html", database_url="postgresql://x").validate()
+        replace(cm_settings, email_link_format="html", database_url="postgresql://x").validate(needs_redis=False)
 
 
 def test_only_the_hash_of_the_token_is_stored(cm_client, repo, mailer):
@@ -106,7 +107,7 @@ def test_monolith_accounts_are_already_verified(cm_client, repo):
     when = datetime(2026, 9, 1, tzinfo=timezone.utc)
     repo.users["admin@example.com"] = dict(
         user_id=7, nombre=None, apellido_paterno=None, apellido_materno=None, display_name="Administrador",
-        email="admin@example.com", is_active=True, created_at=when, email_verified_at=when,
+        email="admin@example.com", is_active=True, role_id=3, created_at=when, email_verified_at=when,
         password_hash=bcrypt.hashpw(b"CambieEstaClave123!", bcrypt.gensalt(4)).decode())
     r = cm_client.post("/login?format=json", json={"email": "admin@example.com", "password": "CambieEstaClave123!"})
     assert r.status_code == 200
@@ -278,12 +279,10 @@ def test_smtp_mailer_rejects_header_injection(cm_settings, smtp):
 
 # ----------------------------------------------------------------- config
 def test_config_requires_mail_from_when_confirmation_is_on():
-    jwt_secret = "test-jwt-secret-0123456789"
+    jwt = dict(jwt_secret_key="test-jwt-secret-key-0123456789abcdef", redis_url="redis://:pw@127.0.0.1:6379/0")
     with pytest.raises(ConfigError, match="MAIL_FROM"):
-        Settings(secret_key="x" * 20, database_url="postgresql://x", email_confirmation_required=True,
-                jwt_secret=jwt_secret).validate()
-    Settings(secret_key="x" * 20, database_url="postgresql://x", email_confirmation_required=False,
-            jwt_secret=jwt_secret).validate()
+        Settings(secret_key="x" * 20, database_url="postgresql://x", email_confirmation_required=True, **jwt).validate()
+    Settings(secret_key="x" * 20, database_url="postgresql://x", email_confirmation_required=False, **jwt).validate()
     with pytest.raises(ConfigError, match="PUBLIC_BASE_URL"):
         Settings(secret_key="x" * 20, database_url="postgresql://x", mail_from="a@b.co", public_base_url="vm:5000",
-                jwt_secret=jwt_secret).validate()
+                 **jwt).validate()

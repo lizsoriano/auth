@@ -1,0 +1,16 @@
+[Unit]
+Description=Library authors service (Flask + gunicorn, puerto 5003, loopback)
+After=network.target postgresql.service redis.service
+Wants=redis.service
+
+[Service]
+User=rutil
+WorkingDirectory=/opt/auth/services/authors
+ExecStart=/opt/auth/services/authors/.venv/bin/gunicorn -w 2 -b 127.0.0.1:5003 app:app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

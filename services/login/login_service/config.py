@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
+from library_common import ConfigError as CommonConfigError
+from library_common import SecuritySettings
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -21,6 +23,14 @@ def _int(name, default):
         return int(raw) if raw else default
     except ValueError:
         raise ConfigError(f"{name} debe ser un entero (recibido: {raw!r})")
+
+
+def _float(name, default):
+    raw = os.getenv(name, "").strip()
+    try:
+        return float(raw) if raw else default
+    except ValueError:
+        raise ConfigError(f"{name} debe ser un número (recibido: {raw!r})")
 
 
 @dataclass(frozen=True)
@@ -59,9 +69,17 @@ class Settings:
     mail_from: str = ""
     log_level: str = "INFO"
     debug: bool = False
-    # --- JWT (emitido en POST /login; el microservicio books lo valida con la misma clave) ---
-    jwt_secret: str = ""
-    jwt_expiration_hours: int = 2
+    # --- JWT HS256 (emitido en POST /login; TODOS los servicios lo validan con la misma clave) ---
+    jwt_secret_key: str = ""
+    jwt_issuer: str = "library-login"
+    jwt_expiration_minutes: int = 20
+    # Vida máxima de una sesión renovable (refresh token). La sesión sigue caducando a los
+    # SESSION_TIMEOUT_MINUTES sin actividad; el refresh la renueva hasta este tope absoluto.
+    refresh_token_ttl_hours: int = 24
+    # --- Redis: sesión, refresh token y revocación de JWT (redis://:password@host:6379/0) ---
+    redis_url: str = ""
+    redis_connect_timeout: float = 1.0
+    redis_socket_timeout: float = 1.0
 
     @classmethod
     def from_env(cls):
@@ -96,11 +114,25 @@ class Settings:
             mail_from=os.getenv("MAIL_FROM", "").strip(),
             log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
             debug=_bool("FLASK_DEBUG", False),
-            jwt_secret=os.getenv("JWT_SECRET", ""),
-            jwt_expiration_hours=_int("JWT_EXPIRATION_HOURS", 2),
+            jwt_secret_key=os.getenv("JWT_SECRET_KEY", ""),
+            jwt_issuer=os.getenv("JWT_ISSUER", "library-login").strip() or "library-login",
+            jwt_expiration_minutes=_int("JWT_EXPIRATION_MINUTES", 20),
+            refresh_token_ttl_hours=_int("REFRESH_TOKEN_TTL_HOURS", 24),
+            redis_url=os.getenv("REDIS_URL", "").strip(),
+            redis_connect_timeout=_float("REDIS_CONNECT_TIMEOUT", 1.0),
+            redis_socket_timeout=_float("REDIS_SOCKET_TIMEOUT", 1.0),
         )
 
-    def validate(self, needs_database=True):
+    def security(self):
+        """Parte común (JWT/Redis) que valida library_common para los 6 servicios."""
+        return SecuritySettings(
+            jwt_secret_key=self.jwt_secret_key, jwt_issuer=self.jwt_issuer,
+            jwt_expiration_minutes=self.jwt_expiration_minutes,
+            refresh_token_ttl_hours=self.refresh_token_ttl_hours, redis_url=self.redis_url,
+            redis_connect_timeout=self.redis_connect_timeout, redis_socket_timeout=self.redis_socket_timeout,
+        )
+
+    def validate(self, needs_database=True, needs_redis=True):
         if len(self.secret_key) < 16:
             raise ConfigError(
                 "FLASK_SECRET_KEY falta o es demasiado corta (mínimo 16 caracteres). "
@@ -114,14 +146,12 @@ class Settings:
             raise ConfigError("SESSION_COOKIE_LIFETIME_HOURS no puede ser menor que la duración de la sesión.")
         if not 4 <= self.bcrypt_rounds <= 15:
             raise ConfigError("BCRYPT_ROUNDS debe estar entre 4 y 15.")
-        if len(self.jwt_secret) < 16:
-            raise ConfigError(
-                "JWT_SECRET falta o es demasiado corta (mínimo 16 caracteres). "
-                "Genera una con: python -c \"import secrets; print(secrets.token_hex(32))\" "
-                "-- debe ser LA MISMA en services/login y services/soap."
-            )
-        if self.jwt_expiration_hours <= 0:
-            raise ConfigError("JWT_EXPIRATION_HOURS debe ser mayor que 0.")
+        try:
+            self.security().validate(needs_redis=needs_redis)
+        except CommonConfigError as exc:
+            raise ConfigError(str(exc)) from None
+        if self.refresh_token_ttl_hours * 60 < self.session_timeout_minutes:
+            raise ConfigError("REFRESH_TOKEN_TTL_HOURS no puede ser menor que SESSION_TIMEOUT_MINUTES.")
         if self.email_confirmation_required:
             if not self.mail_from or "@" not in self.mail_from:
                 raise ConfigError("MAIL_FROM es obligatorio (p. ej. 'Library <no-reply@tu-dominio>') "

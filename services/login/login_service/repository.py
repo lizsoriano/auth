@@ -11,7 +11,7 @@ from psycopg.rows import dict_row
 from .errors import EmailAlreadyExists
 
 USER_COLUMNS = ("user_id, nombre, apellido_paterno, apellido_materno, display_name, email, is_active, "
-                "created_at, email_verified_at, is_admin")
+                "created_at, email_verified_at, is_admin, role_id")
 
 
 class PostgresRepository:
@@ -88,6 +88,12 @@ class PostgresRepository:
         with self._connect() as conn:
             return conn.execute(query, (email,)).fetchone()
 
+    def get_user_by_id(self, user_id):
+        """Para renovar el JWT: el rol o el estado de la cuenta pudieron cambiar desde el login."""
+        query = f"SELECT {USER_COLUMNS} FROM users WHERE user_id = %s"
+        with self._connect() as conn:
+            return conn.execute(query, (user_id,)).fetchone()
+
     def start_session(self, user_id, session_id, created_at, expires_at, ip_address, user_agent):
         with self._connect() as conn:
             conn.execute(
@@ -100,7 +106,7 @@ class PostgresRepository:
         query = """
             SELECT s.session_id, s.created_at AS session_created_at, s.expires_at, s.revoked_at,
                    u.user_id, u.nombre, u.apellido_paterno, u.apellido_materno, u.display_name,
-                   u.email, u.is_active, u.created_at, u.email_verified_at
+                   u.email, u.is_active, u.created_at, u.email_verified_at, u.role_id
               FROM login_sessions s
               JOIN users u ON u.user_id = s.user_id
              WHERE s.session_id = %s

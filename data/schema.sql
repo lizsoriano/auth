@@ -37,6 +37,20 @@ CREATE TABLE authors (
         CHECK (last_name IS NULL OR btrim(last_name) <> '')
 );
 
+-- Roles de aplicación (migración 006). El JWT que emite login lleva user_id y role_id.
+CREATE TABLE roles (
+    role_id smallint PRIMARY KEY,
+    name varchar(30) NOT NULL,
+    description text,
+    CONSTRAINT uq_roles_name UNIQUE (name),
+    CONSTRAINT ck_roles_name_not_blank CHECK (btrim(name) <> '')
+);
+
+INSERT INTO roles (role_id, name, description) VALUES
+    (1, 'admin',    'Administra usuarios, roles, autores, libros, pedidos y pagos'),
+    (2, 'staff',    'Gestiona catálogo, pedidos y pagos; no administra usuarios'),
+    (3, 'customer', 'Cliente: consulta el catálogo y gestiona solo sus propios pedidos y pagos');
+
 CREATE TABLE users (
     user_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     email varchar(254) NOT NULL,
@@ -54,6 +68,11 @@ CREATE TABLE users (
     -- Servicio login: NULL = correo sin confirmar. El default marca como verificadas las cuentas
     -- que crea el monolito (las crea un administrador); el servicio login inserta NULL en los registros públicos.
     email_verified_at timestamptz DEFAULT CURRENT_TIMESTAMP,
+    -- Rol de aplicación (1 admin, 2 staff, 3 customer). Independiente del flag is_admin del monolito.
+    role_id smallint NOT NULL DEFAULT 3,
+    CONSTRAINT fk_users_role FOREIGN KEY (role_id)
+        REFERENCES roles (role_id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
     CONSTRAINT uq_users_email UNIQUE (email),
     CONSTRAINT ck_users_email_not_blank CHECK (btrim(email) <> ''),
     CONSTRAINT ck_users_password_hash_not_blank CHECK (btrim(password_hash) <> ''),
@@ -73,6 +92,23 @@ CREATE UNIQUE INDEX uq_users_email_lower ON users (lower(email));
 CREATE UNIQUE INDEX uq_users_single_administrator
     ON users ((is_admin))
     WHERE is_admin;
+
+CREATE INDEX ix_users_role_id ON users (role_id);
+
+-- Si el monolito crea/promueve a alguien con is_admin = true, su rol de aplicación pasa a admin (1).
+-- Solo se dispara al tocar is_admin: cambiar role_id desde el servicio Users no lo activa.
+CREATE FUNCTION trg_users_admin_role() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.is_admin AND NEW.role_id <> 1 THEN
+        NEW.role_id := 1;
+    END IF;
+    RETURN NEW;
+END $$;
+
+CREATE TRIGGER trg_users_admin_role
+    BEFORE INSERT OR UPDATE OF is_admin ON users
+    FOR EACH ROW EXECUTE FUNCTION trg_users_admin_role();
 
 CREATE TABLE books (
     book_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -223,5 +259,80 @@ CREATE INDEX ix_book_authors_author_id ON book_authors (author_id);
 CREATE INDEX ix_book_genres_genre_id ON book_genres (genre_id);
 CREATE INDEX ix_book_concepts_concept_id ON book_concepts (concept_id);
 CREATE INDEX ix_book_images_book_id ON book_images (book_id);
+
+-- Microservicio Pedidos (migración 009). Estados: 1 pendiente, 2 pagado, 3 enviado, 4 cancelado.
+CREATE TABLE order_statuses (
+    status_id smallint PRIMARY KEY,
+    name varchar(30) NOT NULL,
+    CONSTRAINT uq_order_statuses_name UNIQUE (name),
+    CONSTRAINT ck_order_statuses_name_not_blank CHECK (btrim(name) <> '')
+);
+
+INSERT INTO order_statuses (status_id, name) VALUES
+    (1, 'pendiente'), (2, 'pagado'), (3, 'enviado'), (4, 'cancelado');
+
+CREATE TABLE orders (
+    order_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id bigint NOT NULL,
+    status_id smallint NOT NULL DEFAULT 1,
+    total numeric(12, 2) NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_orders_user FOREIGN KEY (user_id) REFERENCES users (user_id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_orders_status FOREIGN KEY (status_id) REFERENCES order_statuses (status_id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT ck_orders_total_nonnegative CHECK (total >= 0)
+);
+CREATE INDEX ix_orders_user_id ON orders (user_id);
+CREATE INDEX ix_orders_status_id ON orders (status_id);
+
+CREATE TABLE order_items (
+    order_id bigint NOT NULL,
+    book_id bigint NOT NULL,
+    quantity integer NOT NULL,
+    unit_price numeric(12, 2) NOT NULL,
+    PRIMARY KEY (order_id, book_id),
+    CONSTRAINT fk_order_items_order FOREIGN KEY (order_id) REFERENCES orders (order_id)
+        ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT fk_order_items_book FOREIGN KEY (book_id) REFERENCES books (book_id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT ck_order_items_quantity_positive CHECK (quantity > 0),
+    CONSTRAINT ck_order_items_unit_price_nonnegative CHECK (unit_price >= 0)
+);
+CREATE INDEX ix_order_items_book_id ON order_items (book_id);
+
+CREATE FUNCTION trg_orders_set_updated_at() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at := CURRENT_TIMESTAMP;
+    RETURN NEW;
+END $$;
+
+CREATE TRIGGER trg_orders_set_updated_at
+    BEFORE UPDATE ON orders FOR EACH ROW EXECUTE FUNCTION trg_orders_set_updated_at();
+
+-- Microservicio Pagos (migración 010). Un pago por pedido; la clave de idempotencia evita cobrar dos veces.
+CREATE TABLE payments (
+    payment_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    order_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    amount numeric(12, 2) NOT NULL,
+    method varchar(20) NOT NULL,
+    status varchar(20) NOT NULL DEFAULT 'aprobado',
+    idempotency_key varchar(80) NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_payments_idempotency_key UNIQUE (idempotency_key),
+    CONSTRAINT uq_payments_order UNIQUE (order_id),
+    CONSTRAINT fk_payments_order FOREIGN KEY (order_id) REFERENCES orders (order_id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_payments_user FOREIGN KEY (user_id) REFERENCES users (user_id)
+        ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT ck_payments_amount_positive CHECK (amount > 0),
+    CONSTRAINT ck_payments_method CHECK (method IN ('tarjeta', 'transferencia', 'efectivo')),
+    CONSTRAINT ck_payments_status CHECK (status IN ('aprobado')),
+    CONSTRAINT ck_payments_key_not_blank CHECK (btrim(idempotency_key) <> '')
+);
+CREATE INDEX ix_payments_user_id ON payments (user_id);
 
 COMMIT;

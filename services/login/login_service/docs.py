@@ -9,7 +9,7 @@ from flask import Blueprint, jsonify
 from flask_swagger_ui import get_swaggerui_blueprint
 
 from .serializers import error_payload
-from .serializers.xml_serializer import to_xml
+from .serializers import to_xml
 
 docs_blueprint = Blueprint("docs", __name__)
 swagger_ui_blueprint = get_swaggerui_blueprint(
@@ -21,10 +21,12 @@ swagger_ui_blueprint = get_swaggerui_blueprint(
 _USER = {
     "id": 1, "nombre": "Ana", "apellido_paterno": "López", "apellido_materno": "Díaz",
     "display_name": "Ana López Díaz", "email": "ana@gmail.com", "email_verified": False,
-    "created_at": "2026-09-18T20:15:00+00:00",
+    "role_id": 3, "role": "customer", "created_at": "2026-09-18T20:15:00+00:00",
 }
 _USER_OK = dict(_USER, email_verified=True)
 _SESSION = {"expires_at": "2026-09-18T20:45:00+00:00", "expires_in_seconds": 1800}
+_TOKENS = {"token": "eyJhbGciOiJIUzI1NiIs…", "token_type": "Bearer", "token_expires_in_seconds": 1200,
+           "refresh_token": "Xk3v_9mQ2-r7LwA0pYcN8sTzBhU4eDfGjKiOaMnPqRs"}
 
 
 def _content(schema_ref, example):
@@ -115,8 +117,8 @@ def build_spec():
                 },
             }},
             "/login": {"post": {
-                "tags": ["Sesión"], "summary": "Autenticar e iniciar sesión (30 min)",
-                "description": "Verifica las credenciales contra PostgreSQL y crea la sesión. La cookie `login_session` se devuelve en `Set-Cookie`; reutilízala en las siguientes peticiones.",
+                "tags": ["Sesión"], "summary": "Autenticar e iniciar sesión (JWT de 20 min + refresh token)",
+                "description": "Verifica las credenciales contra PostgreSQL y crea la sesión (en Redis, 30 min sin actividad). Devuelve un **JWT HS256 de 20 minutos** (`token`, claims `user_id`, `role_id`, `jti`) para `Authorization: Bearer <token>` en todos los servicios, y un **refresh token de un solo uso** para renovarlo con `POST /token/refresh` antes de que caduque. La cookie `login_session` se devuelve en `Set-Cookie`.",
                 "parameters": [_FORMAT],
                 "requestBody": {"required": True, "content": {"application/json": {
                     "schema": {"$ref": "#/components/schemas/LoginRequest"},
@@ -124,16 +126,38 @@ def build_spec():
                 "responses": {
                     "200": {"description": "Sesión iniciada",
                             "headers": {"Set-Cookie": {"description": "Cookie de sesión `login_session` (HttpOnly)", "schema": {"type": "string"}}},
-                            "content": _content("#/components/schemas/LoginResponse", {"message": "Sesión iniciada", "user": _USER_OK, "session": _SESSION})},
+                            "content": _content("#/components/schemas/LoginResponse", {"message": "Sesión iniciada", "user": _USER_OK, "session": _SESSION, **_TOKENS})},
                     "400": _error("Faltan campos o `format` inválido", "validation_error", "email y password son obligatorios"),
                     "401": _error("Credenciales incorrectas", "invalid_credentials", "Correo o contraseña incorrectos"),
                     "403": _error("Correo sin confirmar (`email_not_confirmed`) o cuenta desactivada (`account_disabled`)",
                                   "email_not_confirmed", "Confirma tu correo antes de iniciar sesión: abre el enlace que enviamos a tu bandeja o solicita otro con POST /resend-verification"),
+                    "503": _error("Redis no disponible: sin Redis no hay sesiones (falla cerrado)", "redis_unavailable",
+                                  "No se puede verificar la sesión en este momento. Intenta de nuevo en unos segundos."),
+                },
+            }},
+            "/token/refresh": {"post": {
+                "tags": ["Sesión"], "summary": "Renovar el JWT antes de que caduque",
+                "description": "Cambia el refresh token por un **JWT nuevo de 20 minutos** y un **refresh token nuevo**. El refresh token es de un solo uso (rotación) y el JWT anterior se revoca de inmediato (`jwt:revoked:<jti>`). Si la sesión ya se cerró o caducó, responde `401 invalid_refresh_token`. Renueva cuando falten unos minutos para que expire el JWT (p. ej. a los 15-18 min).",
+                "parameters": [_FORMAT],
+                "requestBody": {"required": True, "content": {"application/json": {
+                    "schema": {"$ref": "#/components/schemas/RefreshRequest"},
+                    "example": {"refresh_token": _TOKENS["refresh_token"]}}}},
+                "responses": {
+                    "200": {"description": "Token renovado",
+                            "content": _content("#/components/schemas/RefreshResponse",
+                                                {"message": "Token renovado. El refresh token anterior ya no sirve: usa el nuevo.",
+                                                 "session": _SESSION, **_TOKENS})},
+                    "400": _error("Cuerpo inválido o `format` inválido", "invalid_body", "El cuerpo debe ser un objeto JSON válido codificado en UTF-8"),
+                    "401": _error("Refresh token inválido, ya usado, o la sesión caducó/se cerró", "invalid_refresh_token",
+                                  "El refresh token no es válido, ya se usó o la sesión caducó. Inicia sesión de nuevo con POST /login"),
+                    "403": _error("La cuenta fue desactivada", "account_disabled", "La cuenta está desactivada"),
+                    "503": _error("Redis no disponible (falla cerrado)", "redis_unavailable",
+                                  "No se puede verificar la sesión en este momento. Intenta de nuevo en unos segundos."),
                 },
             }},
             "/logout": {"post": {
                 "tags": ["Sesión"], "summary": "Cerrar la sesión",
-                "description": "Revoca la sesión en la base de datos y borra la cookie.",
+                "description": "Cierra la sesión de verdad: **revoca el JWT** (`jwt:revoked:<jti>`), **borra el refresh token y la sesión de Redis**, marca la fila de auditoría en PostgreSQL y borra la cookie. A partir de ese momento ningún servicio acepta ese JWT.",
                 "security": [{"cookieAuth": []}], "parameters": [_FORMAT],
                 "responses": {
                     "200": {"description": "Sesión cerrada",
@@ -154,14 +178,14 @@ def build_spec():
                 },
             }},
             "/health": {"get": {
-                "tags": ["Operación"], "summary": "Estado del servicio y de PostgreSQL",
+                "tags": ["Operación"], "summary": "Estado del servicio, PostgreSQL y Redis",
                 "parameters": [_FORMAT],
                 "responses": {
                     "200": {"description": "Servicio y base de datos disponibles",
                             "content": _content("#/components/schemas/HealthResponse",
-                                                {"status": "ok", "service": "login", "database": "connected", "schema": "ok"})},
+                                                {"status": "ok", "service": "login", "database": "connected", "schema": "ok", "redis": "ok"})},
                     "400": bad_format,
-                    "503": _error("PostgreSQL no disponible o faltan las tablas del servicio", "database_unavailable",
+                    "503": _error("PostgreSQL o Redis no disponibles, o faltan las tablas del servicio", "database_unavailable",
                                   "El servicio está activo pero PostgreSQL no está disponible"),
                 },
             }},
@@ -188,6 +212,8 @@ def build_spec():
                                         "apellido_paterno": {"type": "string", "nullable": True}, "apellido_materno": {"type": "string", "nullable": True},
                                         "email": {"type": "string", "format": "email"},
                                         "email_verified": {"type": "boolean", "description": "false hasta abrir el enlace del correo"},
+                                        "role_id": {"type": "integer", "description": "1 admin, 2 staff, 3 customer (va en el JWT)"},
+                                        "role": {"type": "string", "enum": ["admin", "staff", "customer"]},
                                         "display_name": {"type": "string", "description": "Nombre completo (columna users.display_name, compartida con el monolito)"},
                                         "created_at": {"type": "string", "format": "date-time"}}},
                 "SessionInfo": {"type": "object", "xml": {"name": "session"},
@@ -202,18 +228,31 @@ def build_spec():
                                    "properties": {"message": {"type": "string"},
                                                   "status": {"type": "string", "enum": ["confirmed", "already_confirmed"]},
                                                   "user": {"$ref": "#/components/schemas/User"}}},
+                "TokenFields": {"type": "object", "properties": {
+                    "token": {"type": "string", "description": "JWT HS256 de 20 minutos: Authorization: Bearer <token>"},
+                    "token_type": {"type": "string", "enum": ["Bearer"]},
+                    "token_expires_in_seconds": {"type": "integer", "example": 1200},
+                    "refresh_token": {"type": "string", "description": "De un solo uso; se cambia por otro con POST /token/refresh"}}},
+                "RefreshRequest": {"type": "object", "required": ["refresh_token"],
+                                   "properties": {"refresh_token": {"type": "string"}}},
                 "LoginResponse": {"type": "object", "xml": {"name": "response"},
+                                  "allOf": [{"$ref": "#/components/schemas/TokenFields"}],
                                   "properties": {"message": {"type": "string"}, "user": {"$ref": "#/components/schemas/User"},
                                                  "session": {"$ref": "#/components/schemas/SessionInfo"}}},
+                "RefreshResponse": {"type": "object", "xml": {"name": "response"},
+                                    "allOf": [{"$ref": "#/components/schemas/TokenFields"}],
+                                    "properties": {"message": {"type": "string"},
+                                                   "session": {"$ref": "#/components/schemas/SessionInfo"}}},
                 "SessionResponse": {"type": "object", "xml": {"name": "response"},
                                     "properties": {"authenticated": {"type": "boolean"}, "user": {"$ref": "#/components/schemas/User"},
                                                    "session": {"$ref": "#/components/schemas/SessionInfo"}}},
                 "HealthResponse": {"type": "object", "xml": {"name": "response"},
                                    "properties": {"status": {"type": "string"}, "service": {"type": "string"},
-                                                  "database": {"type": "string"}, "schema": {"type": "string"}}},
+                                                  "database": {"type": "string"}, "schema": {"type": "string"},
+                                                  "redis": {"type": "string"}}},
                 "ErrorResponse": {"type": "object", "xml": {"name": "response"}, "properties": {"error": {
                     "type": "object", "properties": {
-                        "code": {"type": "string", "description": "validation_error, invalid_body, invalid_format, email_exists, invalid_credentials, email_not_confirmed, account_disabled, invalid_token, token_expired, not_authenticated, session_expired, database_unavailable, schema_missing, internal_error"},
+                        "code": {"type": "string", "description": "validation_error, invalid_body, invalid_format, email_exists, invalid_credentials, email_not_confirmed, account_disabled, invalid_token, token_expired, not_authenticated, session_expired, invalid_refresh_token, redis_unavailable, database_unavailable, schema_missing, internal_error"},
                         "message": {"type": "string"},
                         "details": {"type": "array", "items": {"type": "object", "properties": {"field": {"type": "string"}, "message": {"type": "string"}}}}}}}},
             },

@@ -17,9 +17,9 @@ solo parseo del query param `format` y serialización.
 """
 import xml.etree.ElementTree as ET
 
-from flask import jsonify, request
+from flask import current_app, jsonify, request
+from library_common import ROLE_ADMIN, ROLE_STAFF, book_key, books_list_key, invalidate_books
 
-from auth_jwt import token_required
 from db import connection, repository
 from db.errors import LibroInvalidoError, LibroNoEncontradoError
 
@@ -101,9 +101,30 @@ def _libro_a_dict(libro):
 # GET /books  y  GET /books/<isbn>
 # --------------------------------------------------------------------
 
-def listar_libros_view():
+def _svc():
+    """Redis, métricas y TTL de este servicio (los pone app.create_app)."""
+    return current_app.extensions["books"]
+
+
+def _libros_cacheados():
+    """Lista de libros: de Redis si está (books:list:all, TTL corto); si no, de PostgreSQL y se guarda.
+
+    La caché es OPCIONAL: si Redis falla, RedisLayer cuenta el error y devuelve "no hay dato", y se lee de PostgreSQL.
+    Se guarda el dict (no el XML/JSON ya armado), así una sola entrada sirve para ?format=xml y ?format=json.
+    """
+    svc = _svc()
+    key = books_list_key(request.args)
+    cached = svc.redis.cache_get(key)
+    if cached is not None:
+        return cached
     with connection.get_connection() as conn:
         libros = [_libro_a_dict(b) for b in repository.listar_libros(conn)]
+    svc.redis.cache_set(key, libros, svc.cache_ttl)
+    return libros
+
+
+def listar_libros_view():
+    libros = _libros_cacheados()
 
     if quiere_json():
         return jsonify({"books": libros})
@@ -123,9 +144,13 @@ def listar_libros_view():
 
 
 def obtener_libro_view(isbn):
-    with connection.get_connection() as conn:
-        libros = [_libro_a_dict(b) for b in repository.listar_libros(conn)]
-    libro = next((b for b in libros if b["isbn"] == isbn), None)
+    svc = _svc()
+    key = book_key(isbn)  # None si no tiene forma de ISBN: no se cachea (evita claves arbitrarias en Redis)
+    libro = svc.redis.cache_get(key) if key else None
+    if libro is None:
+        libro = next((b for b in _libros_cacheados() if b["isbn"] == isbn), None)
+        if libro is not None and key:
+            svc.redis.cache_set(key, libro, svc.cache_ttl)
 
     if libro is None:
         if quiere_json():
@@ -212,7 +237,6 @@ def listar_libros_con_imagenes_view():
 # (ver auth_jwt.py); las lecturas (GET) siguen públicas, sin cambios.
 # --------------------------------------------------------------------
 
-@token_required
 def crear_libro_view():
     data = _cuerpo()
     if not str(data.get("isbn", "")).strip():
@@ -225,6 +249,7 @@ def crear_libro_view():
             book_id = repository.crear_libro(conn, isbn=str(data["isbn"]).strip(), **campos)
     except LibroInvalidoError as exc:
         return _error(str(exc), 409 if "ya existe" in str(exc).lower() else 400)
+    invalidate_books(_svc().redis, [str(data["isbn"]).strip()])
 
     payload = {"bookId": book_id, "isbn": str(data["isbn"]).strip(), **campos}
     if quiere_json():
@@ -237,7 +262,6 @@ def crear_libro_view():
     return body, 201, headers
 
 
-@token_required
 def actualizar_libro_view(isbn):
     data = _cuerpo()
     campos, mensaje = _datos_libro(data, requiere_isbn=False)
@@ -250,10 +274,10 @@ def actualizar_libro_view(isbn):
         return _error(str(exc), 404)
     except LibroInvalidoError as exc:
         return _error(str(exc), 400)
+    invalidate_books(_svc().redis, [isbn])
     return respond_message_ok(f"Libro {isbn} actualizado correctamente.")
 
 
-@token_required
 def parchear_libro_view(isbn):
     """PATCH /books/<isbn>: a diferencia de PUT (que exige mandar TODOS los
     campos y reemplaza el libro completo), aquí solo se envían los campos
@@ -294,16 +318,17 @@ def parchear_libro_view(isbn):
         return _error(str(exc), 404)
     except LibroInvalidoError as exc:
         return _error(str(exc), 400)
+    invalidate_books(_svc().redis, [isbn])
     return respond_message_ok(f"Libro {isbn} modificado (parcial) correctamente.")
 
 
-@token_required
 def eliminar_libro_view(isbn):
     try:
         with connection.get_connection() as conn:
             repository.eliminar_libro(conn, isbn)
     except LibroNoEncontradoError as exc:
         return _error(str(exc), 404)
+    invalidate_books(_svc().redis, [isbn])
     return respond_message_ok(f"Libro {isbn} eliminado correctamente.")
 
 
@@ -329,7 +354,10 @@ def health_view():
             conn.commit()
     except Exception:
         return _error("El servicio está activo pero PostgreSQL no está disponible", 503)
-    payload = {"status": "ok", "service": "soap", "database": "connected"}
+    # Redis es OPCIONAL para las lecturas: si no responde el servicio sigue sano (degradado), pero los
+    # POST/PUT/PATCH/DELETE devuelven 503 porque no pueden verificar la revocación del JWT.
+    payload = {"status": "ok", "service": "soap", "database": "connected",
+               "redis": "ok" if _svc().redis.ping() else "unavailable"}
     if quiere_json():
         return jsonify(payload)
     root = ET.Element("response")
@@ -338,14 +366,24 @@ def health_view():
     return _xml_response(root)
 
 
-def register(app):
-    """Registra las rutas REST en la app Flask existente (app.py)."""
+def jwt_error_response(code, message, status):
+    """Cómo responde books cuando el JWT falla (mismo formato que sus demás errores)."""
+    return _error(message, status)
+
+
+def register(app, *, jwt_auth):
+    """Registra las rutas REST en la app Flask (app.create_app).
+
+    Las GET son públicas. POST/PUT/PATCH/DELETE exigen `Authorization: Bearer <JWT>` válido (firma, HS256,
+    expiración, claims, no revocado) y rol admin o staff: 401 sin token/inválido, 403 con rol insuficiente.
+    """
+    write = jwt_auth.required(roles=(ROLE_ADMIN, ROLE_STAFF))
     app.add_url_rule("/books", "listar_libros", listar_libros_view, methods=["GET"])
-    app.add_url_rule("/books", "crear_libro", crear_libro_view, methods=["POST"])
+    app.add_url_rule("/books", "crear_libro", write(crear_libro_view), methods=["POST"])
     app.add_url_rule("/books/images", "listar_libros_con_imagenes", listar_libros_con_imagenes_view, methods=["GET"])
     app.add_url_rule("/books/<isbn>", "obtener_libro", obtener_libro_view, methods=["GET"])
-    app.add_url_rule("/books/<isbn>", "actualizar_libro", actualizar_libro_view, methods=["PUT"])
-    app.add_url_rule("/books/<isbn>", "parchear_libro", parchear_libro_view, methods=["PATCH"])
-    app.add_url_rule("/books/<isbn>", "eliminar_libro", eliminar_libro_view, methods=["DELETE"])
+    app.add_url_rule("/books/<isbn>", "actualizar_libro", write(actualizar_libro_view), methods=["PUT"])
+    app.add_url_rule("/books/<isbn>", "parchear_libro", write(parchear_libro_view), methods=["PATCH"])
+    app.add_url_rule("/books/<isbn>", "eliminar_libro", write(eliminar_libro_view), methods=["DELETE"])
     app.add_url_rule("/concepts", "listar_conceptos", listar_conceptos_view, methods=["GET"])
     app.add_url_rule("/health", "health", health_view, methods=["GET"])

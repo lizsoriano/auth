@@ -32,10 +32,8 @@ class Config:
     # soap_service_credenciales (ver sql/soap_module.sql y soap/security.py).
     # Vive solo aquí (variable de entorno del servidor), nunca en la BD.
     WSSE_MASTER_KEY = os.getenv("WSSE_MASTER_KEY", "")
-    # JWT que emite services/login (POST /login) y que aquí solo se valida
-    # (HS256) para las escrituras de /books -- ver auth_jwt.py. Debe ser
-    # exactamente la misma cadena que JWT_SECRET en services/login/.env.
-    JWT_SECRET = os.getenv("JWT_SECRET", "")
+    # JWT_SECRET_KEY, REDIS_URL, CACHE_TTL_SECONDS y CORS_ORIGINS los lee library_common.SecuritySettings
+    # (app.create_app), igual que en los demás servicios.
 
 
 def configure_logging():
