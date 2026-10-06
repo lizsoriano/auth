@@ -9,6 +9,7 @@ Los JWT y refresh tokens salen recortados, la contraseña enmascarada (`********
 |---|---|
 | [`vm_01_health_6_servicios_y_nginx.png`](1_Terminal_VM/vm_01_health_6_servicios_y_nginx.png) | `/health` de los 6 microservicios (puertos 5000-5005) y de Nginx: todos 200. |
 | [`vm_02_evidencia_faseA_parte1.png`](1_Terminal_VM/vm_02_evidencia_faseA_parte1.png) | Evidencia de punta a punta, Fase A (parte 1): JWT de 20 min, sesión en Redis, caché de Books y su invalidación, Authors. |
+| [`vm_03_redis_stop_start_is-active.png`](1_Terminal_VM/vm_03_redis_stop_start_is-active.png) | Redis apagado y encendido con `systemctl`; `is-active` responde `active`. |
 
 ## 2. curl: petición y respuesta por microservicio
 
@@ -26,7 +27,21 @@ Los JWT y refresh tokens salen recortados, la contraseña enmascarada (`********
 | [`curl_10_redis_caido_parte1.png`](2_curl_microservicios/curl_10_redis_caido_parte1.png) | Redis apagado: el catálogo público sigue (200) y `/users/me` con JWT válido falla cerrado (503). |
 | [`curl_10_redis_caido_parte2.png`](2_curl_microservicios/curl_10_redis_caido_parte2.png) | Redis apagado: `POST /login` 503 y `/health` de Books con `redis: unavailable`. |
 
-## Pendientes (se agregan después)
+## 3. App de escritorio Python Tk (contra la VM)
 
-- `3_App_Python_Tk/`: Capturas de la app de escritorio (login y reloj del JWT, una pestaña por servicio, semáforos verdes y con Redis apagado, bitácora HTTP).
-- `4_Animacion_y_portafolio/`: Capturas de la animación (por ejemplo `#books-miss/4` y `#books-put/3`) y de la página Parcial 2 con las dos tarjetas.
+| Imagen | Qué demuestra |
+|---|---|
+| [`tk_01_login_admin_jwt_y_configuracion_VM.png`](3_App_Python_Tk/tk_01_login_admin_jwt_y_configuracion_VM.png) | App Tk: sesión como admin con el reloj del JWT (20 min) y las 6 URLs de los microservicios. |
+| [`tk_02_semaforos_verdes.png`](3_App_Python_Tk/tk_02_semaforos_verdes.png) | Semáforos: los 6 microservicios y Redis en verde. |
+| [`tk_03_libros_crear_POST.png`](3_App_Python_Tk/tk_03_libros_crear_POST.png) | Libros (Books): alta de un libro con `POST`. |
+| [`tk_04_autores_crear_POST_201.png`](3_App_Python_Tk/tk_04_autores_crear_POST_201.png) | Autores (Authors): alta de un autor, `POST` 201. |
+| [`tk_06_usuarios_listar_GET_200.png`](3_App_Python_Tk/tk_06_usuarios_listar_GET_200.png) | Usuarios (Users): lista de usuarios y roles como admin, `GET` 200. |
+| [`tk_07_pedidos_crear_POST_201.png`](3_App_Python_Tk/tk_07_pedidos_crear_POST_201.png) | Pedidos: alta de un pedido, `POST` 201, pendiente de pago. |
+| [`tk_08_pagos_registrar_POST_201.png`](3_App_Python_Tk/tk_08_pagos_registrar_POST_201.png) | Pagos: pago del pedido, `POST` 201. |
+| [`tk_09_pagos_idempotencia_NO_se_cobro_otra_vez.png`](3_App_Python_Tk/tk_09_pagos_idempotencia_NO_se_cobro_otra_vez.png) | Pagos: reintento con la misma clave, `Idempotent-Replay: true` («NO se cobró otra vez»). |
+| [`tk_10_semaforos_redis_apagado.png`](3_App_Python_Tk/tk_10_semaforos_redis_apagado.png) | Semáforos con Redis apagado: los 6 servicios en amarillo (degradado) y Redis en rojo. |
+| [`tk_11_semaforos_redis_recuperado.png`](3_App_Python_Tk/tk_11_semaforos_redis_recuperado.png) | Semáforos: Redis de nuevo encendido, todo en verde. |
+
+## Pendiente (se agrega después)
+
+- `4_Animacion_y_portafolio/`: capturas de la animación y de la página Parcial 2 (se agregan después).
