@@ -11,6 +11,8 @@ Monorepo de seis microservicios Flask con PostgreSQL (`library_db`, fuente de ve
 - [pedidos](services/pedidos/README.md): 5004, prefijo `/pedidos/`.
 - [pagos](services/pagos/README.md): 5005, prefijo `/pagos/`.
 
+Aparte de esos seis, el repo incluye el ejercicio de rastreo GPS con WebSockets: el microservicio [gps](services/gps/README.md) (Flask + Flask-Sock, puerto 5900, con el mapa Leaflet incluido) y la app de escritorio simuladora [gpsapp](gpsapp/README.md). No usa PostgreSQL, Redis ni JWT, y no está en nginx ni en la VM.
+
 Los prefijos describen el proxy previsto; verifica su instalación en la VM. Nginx elimina el prefijo: `/users/users/me` llega a `/users/me`. Todos los servicios escuchan en loopback; el monolito externo continúa en 3000 bajo `/library/`.
 
 ## Configuración y seguridad

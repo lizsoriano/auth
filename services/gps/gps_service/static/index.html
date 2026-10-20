@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monterrey GPS Tracker</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  :root { --ink:#0f1c3a; --muted:#5b6784; --line:#dfe4f0; --ok:#1a8f4c; --bad:#c0392b; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+  body { display: grid; grid-template-columns: 320px 1fr; grid-template-rows: auto 1fr; }
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 16px; padding: 10px 18px;
+           background: #12224a; color: #fff; }
+  header h1 { margin: 0; font-size: 18px; font-weight: 700; }
+  header small { color: #b8c4e6; }
+  #status { margin-left: auto; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600;
+            background: var(--bad); color: #fff; }
+  #status.on { background: var(--ok); }
+  aside { overflow: auto; border-right: 1px solid var(--line); background: #f7f8fc; }
+  aside h2 { margin: 0; padding: 12px 16px 6px; font-size: 13px; text-transform: uppercase;
+             letter-spacing: .06em; color: var(--muted); }
+  #list { list-style: none; margin: 0; padding: 0 8px 12px; }
+  #list li { display: grid; grid-template-columns: 14px 1fr auto; gap: 10px; align-items: center;
+             padding: 9px 10px; margin: 4px 0; border: 1px solid var(--line); border-radius: 8px;
+             background: #fff; cursor: pointer; }
+  #list li:hover { border-color: #8aa0d8; }
+  #list li.stale { opacity: .45; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--c); }
+  .name { font-weight: 700; }
+  .meta { font-size: 12px; color: var(--muted); }
+  .speed { font-weight: 700; font-variant-numeric: tabular-nums; }
+  #empty { padding: 14px 18px; color: var(--muted); font-size: 14px; }
+  #map { height: 100%; width: 100%; }
+  .veh { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%;
+         background: #fff; border: 3px solid var(--c); box-shadow: 0 1px 5px rgba(0,0,0,.35); }
+  .arrow { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent;
+           border-bottom: 11px solid var(--c); }
+  .leaflet-tooltip.vid { font-weight: 700; padding: 1px 6px; }
+  @media (max-width: 760px) { body { grid-template-columns: 1fr; grid-template-rows: auto 38vh 1fr; }
+    aside { border-right: 0; border-bottom: 1px solid var(--line); order: 2; } #map { order: 3; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Monterrey GPS Tracker <small>en tiempo real</small></h1>
+  <span id="status">Desconectado</span>
+</header>
+<aside>
+  <h2>Vehículos (<span id="count">0</span>)</h2>
+  <div id="empty">Esperando posiciones del simulador (role=gps)…</div>
+  <ul id="list"></ul>
+</aside>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+const MONTERREY = [25.6866, -100.3161];
+const MAX_TRAIL = 100;
+const STALE_MS = 15000;
+
+const map = L.map("map", { fadeAnimation: false }).setView(MONTERREY, 12);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+}).addTo(map);
+
+const vehicles = new Map(); // vehicle_id -> { marker, line, data, lastSeen }
+const statusEl = document.getElementById("status");
+const listEl = document.getElementById("list");
+const emptyEl = document.getElementById("empty");
+const countEl = document.getElementById("count");
+let firstSnapshot = true;
+
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function colorFor(id) {
+  let h = 0;
+  for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return `hsl(${(h * 137.508) % 360} 70% 40%)`; // ángulo áureo: ids consecutivos dan tonos bien separados
+}
+
+function iconFor(v) {
+  return L.divIcon({
+    className: "", iconSize: [28, 28], iconAnchor: [14, 14],
+    html: `<div class="veh" style="--c:${colorFor(v.vehicle_id)}"><div class="arrow" style="transform:rotate(${Number(v.heading)}deg)"></div></div>`
+  });
+}
+
+function upsert(v, trail) {
+  const pos = [v.latitude, v.longitude];
+  let e = vehicles.get(v.vehicle_id);
+  if (!e) {
+    e = {
+      marker: L.marker(pos, { icon: iconFor(v) }).addTo(map)
+        .bindTooltip(esc(v.vehicle_id), { permanent: true, direction: "right", offset: [14, 0], className: "vid" }),
+      line: L.polyline(trail && trail.length ? trail : [pos], { color: colorFor(v.vehicle_id), weight: 3, opacity: 0.7 }).addTo(map),
+      data: v, lastSeen: Date.now()
+    };
+    vehicles.set(v.vehicle_id, e);
+  } else {
+    e.marker.setLatLng(pos).setIcon(iconFor(v));
+    e.line.addLatLng(pos);
+    const pts = e.line.getLatLngs();
+    if (pts.length > MAX_TRAIL) e.line.setLatLngs(pts.slice(-MAX_TRAIL));
+    e.data = v; e.lastSeen = Date.now();
+  }
+  e.marker.setOpacity(1);
+}
+
+function remove(id) {
+  const e = vehicles.get(id);
+  if (!e) return;
+  map.removeLayer(e.marker); map.removeLayer(e.line);
+  vehicles.delete(id);
+}
+
+function renderList() {
+  const ids = [...vehicles.keys()].sort();
+  countEl.textContent = ids.length;
+  emptyEl.hidden = ids.length > 0;
+  listEl.replaceChildren(...ids.map((id) => {
+    const { data, lastSeen } = vehicles.get(id);
+    const li = document.createElement("li");
+    li.className = Date.now() - lastSeen > STALE_MS ? "stale" : "";
+    li.style.setProperty("--c", colorFor(id));
+    li.innerHTML = `<span class="dot"></span>
+      <div><div class="name">${esc(id)}</div>
+      <div class="meta">${data.latitude.toFixed(4)}, ${data.longitude.toFixed(4)} · rumbo ${Math.round(data.heading)}°</div></div>
+      <span class="speed">${data.speed.toFixed(0)} km/h</span>`;
+    li.addEventListener("click", () => map.flyTo([data.latitude, data.longitude], 15));
+    return li;
+  }));
+}
+
+function onMessage(msg) {
+  if (msg.type === "snapshot") {
+    const incoming = new Set(msg.vehicles.map((v) => v.vehicle_id));
+    for (const id of [...vehicles.keys()]) if (!incoming.has(id)) remove(id);
+    for (const v of msg.vehicles) { remove(v.vehicle_id); upsert(v, v.trail); }
+    if (firstSnapshot && msg.vehicles.length) {
+      map.invalidateSize();
+      map.fitBounds(L.latLngBounds(msg.vehicles.map((v) => [v.latitude, v.longitude])), { padding: [60, 60], maxZoom: 14 });
+      firstSnapshot = false;
+    }
+  } else if (msg.type === "update") {
+    upsert(msg.vehicle);
+  }
+  renderList();
+}
+
+let retry = 1000;
+function connect() {
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${scheme}://${location.host}/ws?role=map`);
+  ws.onopen = () => { retry = 1000; statusEl.textContent = "En vivo"; statusEl.className = "on"; };
+  ws.onmessage = (ev) => { try { onMessage(JSON.parse(ev.data)); } catch (err) { console.error(err); } };
+  ws.onclose = () => {
+    statusEl.textContent = "Reconectando…"; statusEl.className = "";
+    setTimeout(connect, retry); retry = Math.min(retry * 2, 10000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+setInterval(() => {
+  for (const e of vehicles.values()) e.marker.setOpacity(Date.now() - e.lastSeen > STALE_MS ? 0.35 : 1);
+  renderList();
+}, 5000);
+
+new ResizeObserver(() => map.invalidateSize()).observe(document.getElementById("map"));
+connect();
+</script>
+</body>
+</html>
