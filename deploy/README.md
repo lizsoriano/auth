@@ -1,6 +1,6 @@
 # Despliegue en la VM
 
-Scripts para CentOS Stream 10, ejecutados por SSH en la VM. El despliegue de microservicios necesita una base Library ya existente, el rol de login, Postfix cuando se use correo y `/opt/library_soap_service` configurado. No se ha ejecutado este despliegue nuevo en la VM; consulta [PENDIENTE.md](../PENDIENTE.md).
+Scripts para CentOS Stream 10, ejecutados por SSH en la VM. El despliegue de microservicios necesita una base Library ya existente, el rol de login, Postfix cuando se use correo y `/opt/library_soap_service` configurado. No se ha ejecutado este despliegue nuevo en la VM.
 
 ## Secuencia
 
@@ -54,3 +54,7 @@ No introduzcas tokens en argumentos compartidos ni adjuntes .env/logs con secret
 ## Copia local a Desktop\app
 
 En PowerShell, `./deploy/sync_workspace.ps1` muestra los cambios; `./deploy/sync_workspace.ps1 -Apply` copia services, data, deploy, docs, e2e y documentación raíz. Respalda los archivos reemplazados bajo `.auth-sync-backups` en el destino, conserva los demás proyectos y excluye .env y entornos virtuales. No elimina archivos antiguos. `auth-service` es una copia histórica distinta y no se reemplaza.
+
+## API Gateway
+
+`setup_gateway_vm.sh` instala [`services/gateway`](../services/gateway/README.md) (`gateway.service`, `127.0.0.1:8080`) y deja a Nginx como única puerta pública hacia él (`nginx-gateway-proxy.conf`, por IP, sin dominio). Aparta los `.conf` por servicio a `/etc/nginx/default.d.gateway-backup/`; `sudo bash deploy/setup_gateway_vm.sh --rollback` los restaura. `/library` no se toca. Todavía no se ha ejecutado en la VM; la cadena Nginx → gateway → servicios sí se probó en local con `e2e/verificar_gateway.py`.

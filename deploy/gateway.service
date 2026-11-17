@@ -1,0 +1,18 @@
+[Unit]
+Description=Library API Gateway (Flask + Flask-Sock, puerto 8080, loopback)
+After=network.target
+
+[Service]
+User=rutil
+WorkingDirectory=/opt/auth/services/gateway
+# Opcional: direcciones de los servicios y tiempos (por defecto: 127.0.0.1 con los puertos de la VM). No lleva secretos.
+EnvironmentFile=-/opt/auth/services/gateway/.env
+# UN proceso con muchos hilos: cada WebSocket de rastreo ocupa un hilo mientras dura la entrega.
+ExecStart=/opt/auth/services/gateway/.venv/bin/gunicorn -w 1 --threads 200 -b 127.0.0.1:8080 app:app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
