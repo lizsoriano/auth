@@ -49,6 +49,10 @@ sudo -u "$SVC_USER" python3 -m venv "$GW_DIR/.venv"
 sudo -u "$SVC_USER" "$GW_DIR/.venv/bin/pip" install -q -r "$GW_DIR/requirements.txt" gunicorn
 
 say "2) .env (sin secretos)"
+# systemd no admite comentarios en la misma linea que el valor (VAR=3  # texto): si el .env los trae, se rehace desde el ejemplo.
+if [ -f "$GW_DIR/.env" ] && grep -Eq '^[A-Z_]+=[^#]*[[:space:]]#' "$GW_DIR/.env"; then
+  mv -f "$GW_DIR/.env" "$GW_DIR/.env.bak"
+fi
 if [ ! -f "$GW_DIR/.env" ]; then
   install -m 644 -o "$SVC_USER" -g "$SVC_USER" "$GW_DIR/.env.example" "$GW_DIR/.env"
 fi

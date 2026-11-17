@@ -204,3 +204,18 @@ def test_config_por_entorno():
 def test_create_app_sin_argumentos_usa_el_entorno():
     app = create_app()
     assert app.extensions["gateway_settings"].upstreams["soap"] == "http://127.0.0.1:5001"
+
+
+def test_env_example_es_valido_para_systemd_y_para_el_gateway():
+    """systemd no admite comentarios en la misma linea que el valor: '3  # texto' llegaria como el valor completo."""
+    from pathlib import Path
+    env = {}
+    for raw in (Path(__file__).resolve().parent.parent / ".env.example").read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        assert "#" not in line, f"comentario en la misma linea: {raw!r}"
+        key, _, value = line.partition("=")
+        env[key] = value
+    settings = Settings.from_env(env)        # no debe lanzar ValueError
+    assert settings.connect_timeout == 3 and settings.read_timeout == 30 and settings.max_body_bytes == 1_048_576
