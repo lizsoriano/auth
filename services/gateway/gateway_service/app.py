@@ -82,6 +82,8 @@ def create_app(settings=None):
         """Un redirect del servicio apunta a SU ruta interna: se le vuelve a poner el prefijo público."""
         if value.startswith(upstream):
             value = value[len(upstream):] or "/"
+        if service.keep_prefix:      # el servicio ya incluye su prefijo en sus rutas
+            return value
         if value.startswith("/") and not value.startswith("//"):
             return f"/{service.name}{value}"
         return value
@@ -91,7 +93,7 @@ def create_app(settings=None):
         started = time.perf_counter()
         rid = request_id()
         upstream = settings.upstreams[service.name]
-        url = f"{upstream}/{rest}"
+        url = f"{upstream}/{service.name}/{rest}" if service.keep_prefix else f"{upstream}/{rest}"
         if request.query_string:
             url += "?" + request.query_string.decode("latin-1")
 

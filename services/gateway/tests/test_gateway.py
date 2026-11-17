@@ -13,12 +13,18 @@ def get(url, **kw):
 
 
 # ----------------------------------------------------------------------------- enrutamiento
-@pytest.mark.parametrize("name", [s.name for s in SERVICES])
+@pytest.mark.parametrize("name", [s.name for s in SERVICES if not s.keep_prefix])
 def test_cada_prefijo_llega_a_su_servicio_y_se_recorta(stack, name):
     gw, _ = stack
     data = get(f"{gw}/{name}/echo/uno/dos").json()
     assert data["service"] == name
     assert data["path"] == "/echo/uno/dos"          # el prefijo público NO llega al servicio
+
+
+def test_library_conserva_su_prefijo_porque_el_monolito_lo_usa(stack):
+    gw, _ = stack
+    d = get(f"{gw}/library/uploads/seed/978-1.jpg").json()
+    assert d["service"] == "library" and d["path"] == "/library/uploads/seed/978-1.jpg"      # NO se recorta
 
 
 def test_query_string_y_metodos(stack):

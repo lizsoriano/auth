@@ -10,7 +10,8 @@ Es la **única puerta** hacia los microservicios. Las apps (Java, Tkinter, Elect
                                                                                 ├─►  authors  :5003   /authors
                                                                                 ├─►  pedidos  :5004   /pedidos
                                                                                 ├─►  pagos    :5005   /pagos
-                                                                                └─►  gps      :5900   /gps  (REST + WebSocket)
+                                                                                ├─►  gps      :5900   /gps  (REST + WebSocket)
+                                                                                └─►  monolito :3000   /library (portadas; conserva el prefijo)
                                                                       PostgreSQL y Redis: solo los usan los servicios
 ```
 
@@ -32,7 +33,7 @@ Es la **única puerta** hacia los microservicios. Las apps (Java, Tkinter, Elect
 | Errores en JSON: `502` servicio caído, `504` servicio lento (30 s), `413` cuerpo > 1 MiB, `404` prefijo desconocido | |
 | `GET /health`: estado `up/degraded/down` de cada servicio, sin revelar direcciones internas | |
 
-Los **contratos de los servicios no cambian** y los prefijos son los de siempre (`/auth`, `/soap`, `/users`, `/authors`, `/pedidos`, `/pagos`, `/gps`), así que las apps solo cambian de dirección base, no de código. `/library` (el monolito que sirve las portadas) sigue directo en Nginx.
+Los **contratos de los servicios no cambian** y los prefijos son los de siempre (`/auth`, `/soap`, `/users`, `/authors`, `/pedidos`, `/pagos`, `/gps`), así que las apps solo cambian de dirección base, no de código. `/library` (el monolito que sirve las portadas) lo atiende directo Nginx en la VM; el gateway también lo enruta (conservando el prefijo, porque el monolito sirve todo bajo `/library`) para que **una sola dirección** baste incluso en local.
 
 ## Ejecutar en local
 
@@ -52,14 +53,14 @@ GPS_URL=http://127.0.0.1:5900 python app.py
 curl http://127.0.0.1:8080/health
 ```
 
-Variables (todas opcionales, ver `.env.example`): `<NOMBRE>_URL` por servicio (`AUTH_URL`, `SOAP_URL`, `USERS_URL`, `AUTHORS_URL`, `PEDIDOS_URL`, `PAGOS_URL`, `GPS_URL`), `GATEWAY_HOST` (127.0.0.1), `GATEWAY_PORT` (8080), `GATEWAY_CONNECT_TIMEOUT` (3 s), `GATEWAY_READ_TIMEOUT` (30 s), `GATEWAY_MAX_BODY_BYTES` (1 MiB), `GATEWAY_LOG_LEVEL`. El gateway **no lleva secretos**.
+Variables (todas opcionales, ver `.env.example`): `<NOMBRE>_URL` por servicio (`AUTH_URL`, `SOAP_URL`, `USERS_URL`, `AUTHORS_URL`, `PEDIDOS_URL`, `PAGOS_URL`, `GPS_URL`, `LIBRARY_URL`), `GATEWAY_HOST` (127.0.0.1), `GATEWAY_PORT` (8080), `GATEWAY_CONNECT_TIMEOUT` (3 s), `GATEWAY_READ_TIMEOUT` (30 s), `GATEWAY_MAX_BODY_BYTES` (1 MiB), `GATEWAY_LOG_LEVEL`. El gateway **no lleva secretos**.
 
 Si los servicios corren como contenedores o *pods* en lugar de procesos, solo cambian esas URL (`PEDIDOS_URL=http://servicio-pedidos:5004`). Hay un `Dockerfile` opcional.
 
 ## Pruebas
 
 ```bash
-.venv/Scripts/python -m pytest -q     # 30 pruebas: enrutamiento, encabezados, cookies, redirecciones, 413/502/504, health y WebSocket
+.venv/Scripts/python -m pytest -q     # 32 pruebas: enrutamiento, encabezados, cookies, redirecciones, 413/502/504, health y WebSocket
 ```
 
 Usan servicios falsos en puertos libres. Además, `e2e/verificar_gateway.py` recorre el flujo real (login → perfil → catálogo → pedido → pago → rastreo REST y WebSocket) **solo a través del gateway** contra la pila local.

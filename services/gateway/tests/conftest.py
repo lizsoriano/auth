@@ -44,6 +44,10 @@ def fake_service(name):
                         "query": request.query_string.decode(), "body": request.get_data(as_text=True),
                         "headers": {k.lower(): v for k, v in request.headers}})
 
+    @app.route("/library/<path:rest>", methods=methods)
+    def library(rest):          # el monolito sirve bajo /library: aqui llega con el prefijo
+        return jsonify({"service": name, "path": request.path, "rest": rest})
+
     @app.get("/health")
     def health():
         return jsonify({"status": "ok", "service": name})

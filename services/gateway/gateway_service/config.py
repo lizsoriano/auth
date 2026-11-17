@@ -8,6 +8,7 @@ class Service:
     name: str          # nombre corto; también el prefijo público: /<name>/...
     default_url: str   # dirección interna por defecto (loopback)
     websocket: bool = False   # si acepta WebSocket en /<name>/ws/...
+    keep_prefix: bool = False  # True: el servicio vive bajo /<name>/ (el monolito) y NO se recorta el prefijo
     description: str = ""
 
     @property
@@ -24,6 +25,8 @@ SERVICES = (
     Service("pedidos", "http://127.0.0.1:5004", description="pedidos, líneas y estados"),
     Service("pagos", "http://127.0.0.1:5005", description="pagos (Idempotency-Key en POST)"),
     Service("gps", "http://127.0.0.1:5900", websocket=True, description="rastreo de pedidos (REST + WebSocket)"),
+    # El monolito (portadas y web) ya sirve todo bajo /library: se reenvia con el prefijo. En la VM lo atiende Nginx directo.
+    Service("library", "http://127.0.0.1:3000", keep_prefix=True, description="monolito: portadas (/library/uploads/...)"),
 )
 
 
