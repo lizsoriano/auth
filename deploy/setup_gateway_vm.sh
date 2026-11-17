@@ -57,6 +57,17 @@ if [ ! -f "$GW_DIR/.env" ]; then
   install -m 644 -o "$SVC_USER" -g "$SVC_USER" "$GW_DIR/.env.example" "$GW_DIR/.env"
 fi
 
+# Los puertos de la VM pueden no ser los del repo (p. ej. users 5004, authors 5005, pedidos 5003, pagos 5002): se leen del
+# `-b/--bind` de la unit systemd de cada servicio y se escriben en el .env del gateway, para que /users llegue a users, etc.
+set_env() { # set_env CLAVE VALOR
+  if grep -q "^$1=" "$GW_DIR/.env"; then sed -i "s#^$1=.*#$1=$2#" "$GW_DIR/.env"; else echo "$1=$2" >> "$GW_DIR/.env"; fi
+}
+for svc in login:AUTH soap:SOAP users:USERS authors:AUTHORS pedidos:PEDIDOS pagos:PAGOS gps:GPS; do
+  unit=${svc%%:*}; var=${svc##*:}
+  port=$(systemctl cat "$unit.service" 2>/dev/null | grep -E '^ExecStart=' | grep -oE '(-b|--bind)[ =]+[0-9a-zA-Z.]+:[0-9]+' | head -1 | grep -oE '[0-9]+$' || true)
+  if [ -n "$port" ]; then set_env "${var}_URL" "http://127.0.0.1:$port"; echo "  $unit -> 127.0.0.1:$port"; else echo "  $unit: sin unit (se usa el puerto por defecto)"; fi
+done
+
 say "3) servicio systemd gateway"
 install -m 644 "$REPO/deploy/gateway.service" /etc/systemd/system/gateway.service
 systemctl daemon-reload
