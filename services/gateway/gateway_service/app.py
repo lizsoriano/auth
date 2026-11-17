@@ -43,7 +43,7 @@ def create_app(settings=None):
     app.config["SOCK_SERVER_OPTIONS"] = {"ping_interval": 25}
     app.json.ensure_ascii = False
     sock = Sock(app)
-    services = {s.name: s for s in SERVICES}
+    services = {name: s for s in SERVICES for name in s.names}     # nombre y alias -> servicio
     session = requests.Session()     # reutiliza conexiones con los servicios (keep-alive)
     app.extensions["gateway_settings"] = settings
 
@@ -59,14 +59,14 @@ def create_app(settings=None):
         """Solo el Nginx local (loopback) puede decir de qué IP/host/protocolo viene realmente el cliente."""
         return request.remote_addr in ("127.0.0.1", "::1")
 
-    def forward_headers(service, rid):
+    def forward_headers(service, rid, prefix):
         headers = {k: v for k, v in request.headers if k.lower() not in HOP_BY_HOP and k.lower() not in GATEWAY_OWNED}
         trusted = from_trusted_proxy()
         headers["X-Request-ID"] = rid
         headers["X-Forwarded-For"] = (request.headers.get("X-Forwarded-For") if trusted else None) or client_ip()
         headers["X-Forwarded-Proto"] = (request.headers.get("X-Forwarded-Proto") if trusted else None) or request.scheme
         headers["X-Forwarded-Host"] = (request.headers.get("X-Forwarded-Host") if trusted else None) or request.host
-        headers["X-Forwarded-Prefix"] = f"/{service.name}"
+        headers["X-Forwarded-Prefix"] = prefix
         return headers
 
     def error(status, code, message, rid, service=None):
@@ -78,18 +78,18 @@ def create_app(settings=None):
         resp.headers["X-Request-ID"] = rid
         return resp
 
-    def rewrite_location(value, service, upstream):
+    def rewrite_location(value, service, upstream, prefix):
         """Un redirect del servicio apunta a SU ruta interna: se le vuelve a poner el prefijo público."""
         if value.startswith(upstream):
             value = value[len(upstream):] or "/"
         if service.keep_prefix:      # el servicio ya incluye su prefijo en sus rutas
             return value
         if value.startswith("/") and not value.startswith("//"):
-            return f"/{service.name}{value}"
+            return f"{prefix}{value}"
         return value
 
     # ---------------------------------------------------------------- HTTP
-    def proxy_http(service, rest):
+    def proxy_http(service, rest, prefix):
         started = time.perf_counter()
         rid = request_id()
         upstream = settings.upstreams[service.name]
@@ -102,14 +102,14 @@ def create_app(settings=None):
 
         try:
             resp = session.request(
-                request.method, url, headers=forward_headers(service, rid), data=request.get_data(),
+                request.method, url, headers=forward_headers(service, rid, prefix), data=request.get_data(),
                 allow_redirects=False, stream=True, timeout=(settings.connect_timeout, settings.read_timeout))
         except requests.exceptions.ReadTimeout:      # conectó, pero el servicio no contestó a tiempo
-            log.warning("%s %s /%s/%s -> 504 %.0f ms", rid, request.method, service.name, rest, elapsed())
+            log.warning("%s %s %s/%s -> 504 %.0f ms", rid, request.method, prefix, rest, elapsed())
             return error(504, "gateway_timeout", f"El servicio «{service.name}» tardó demasiado en responder.", rid,
                          service.name)
         except requests.exceptions.RequestException:   # no se pudo conectar (rechazo o tiempo de conexión)
-            log.warning("%s %s /%s/%s -> 502 %.0f ms", rid, request.method, service.name, rest, elapsed())
+            log.warning("%s %s %s/%s -> 502 %.0f ms", rid, request.method, prefix, rest, elapsed())
             return error(502, "bad_gateway", f"El servicio «{service.name}» no está disponible.", rid, service.name)
 
         # Se reenvían los bytes tal cual (sin descomprimir) y todos los encabezados salvo los de la conexión.
@@ -122,19 +122,33 @@ def create_app(settings=None):
         for cookie in resp.raw.headers.getlist("Set-Cookie"):
             out.headers.add("Set-Cookie", cookie)
         if resp.headers.get("Location"):
-            out.headers["Location"] = rewrite_location(resp.headers["Location"], service, upstream)
+            out.headers["Location"] = rewrite_location(resp.headers["Location"], service, upstream, prefix)
         out.headers["X-Request-ID"] = rid
         out.call_on_close(resp.close)
-        log.info("%s %s /%s/%s -> %s %.0f ms", rid, request.method, service.name, rest, resp.status_code, elapsed())
+        log.info("%s %s %s/%s -> %s %.0f ms", rid, request.method, prefix, rest, resp.status_code, elapsed())
         return out
 
-    @app.route("/<service_name>/", defaults={"rest": ""}, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
-    @app.route("/<service_name>/<path:rest>", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
-    def route(service_name, rest):
+    METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+
+    def resolve(service_name):
+        """Servicio y prefijo público para la petición actual: /api/<nombre-o-alias>/... o el prefijo antiguo /<nombre>/..."""
         service = services.get(service_name)
+        via_api = request.path.startswith("/api/")
+        if service is not None and via_api and service.keep_prefix:
+            service = None            # el monolito no es parte de la API: vive en "/"
+        return service, (f"/api/{service_name}" if via_api else f"/{service_name}")
+
+    def route(service_name, rest):
+        service, prefix = resolve(service_name)
         if service is None:
             return error(404, "unknown_service", f"No existe el servicio «{service_name}».", request_id())
-        return proxy_http(service, rest)
+        return proxy_http(service, rest, prefix)
+
+    # Un endpoint DISTINTO por regla: con el mismo endpoint, Werkzeug "canoniza" /api/login/ redirigiendo a /login/.
+    app.add_url_rule("/api/<service_name>/", endpoint="route_api_root", view_func=route, defaults={"rest": ""}, methods=METHODS)
+    app.add_url_rule("/api/<service_name>/<path:rest>", endpoint="route_api", view_func=route, methods=METHODS)
+    app.add_url_rule("/<service_name>/", endpoint="route_root", view_func=route, defaults={"rest": ""}, methods=METHODS)
+    app.add_url_rule("/<service_name>/<path:rest>", endpoint="route_legacy", view_func=route, methods=METHODS)
 
     @app.errorhandler(413)
     def too_large(_exc):
@@ -151,9 +165,13 @@ def create_app(settings=None):
 
     # ---------------------------------------------------------------- índice y salud
     @app.get("/")
+    @app.get("/api")
+    @app.get("/api/")
     def index():
-        return jsonify({"service": "gateway", "routes": {f"/{s.name}/": s.description for s in SERVICES},
-                        "health": "/health"})
+        return jsonify({"service": "gateway",
+                        "api": {f"/api/{n}/": s.description for s in SERVICES if not s.keep_prefix for n in s.names},
+                        "routes": {f"/{s.name}/": s.description for s in SERVICES},
+                        "health": "/api/health"})
 
     def check(service):
         try:
@@ -163,6 +181,7 @@ def create_app(settings=None):
             return service.name, "down"
 
     @app.get("/health")
+    @app.get("/api/health")
     def health():
         """El gateway siempre responde si está vivo; `upstreams` dice qué servicios contestan (sin revelar sus direcciones)."""
         with ThreadPoolExecutor(max_workers=len(SERVICES)) as pool:
@@ -171,9 +190,8 @@ def create_app(settings=None):
         return jsonify({"status": overall, "service": "gateway", "upstreams": states})
 
     # ---------------------------------------------------------------- WebSocket (solo servicios con websocket=True)
-    @sock.route("/<service_name>/ws/<path:rest>")
     def websocket_proxy(client, service_name, rest):
-        service = services.get(service_name)
+        service, prefix = resolve(service_name)
         rid = request_id()
         if service is None or not service.websocket:
             client.close(reason=1008, message="servicio sin WebSocket")
@@ -185,14 +203,14 @@ def create_app(settings=None):
         try:
             up = websocket.create_connection(url, timeout=settings.connect_timeout,
                                              header=[f"X-Request-ID: {rid}", f"X-Forwarded-For: {client_ip()}",
-                                                     f"X-Forwarded-Prefix: /{service.name}"])
+                                                     f"X-Forwarded-Prefix: {prefix}"])
         except (OSError, websocket.WebSocketException):
-            log.warning("%s WS /%s/ws/%s -> no se pudo abrir el servicio", rid, service.name, rest)
+            log.warning("%s WS %s/ws/%s -> no se pudo abrir el servicio", rid, prefix, rest)
             client.close(reason=1013, message="servicio no disponible")
             return
         up.settimeout(1.0)
         stop = threading.Event()
-        log.info("%s WS /%s/ws/%s abierto", rid, service.name, rest)
+        log.info("%s WS %s/ws/%s abierto", rid, prefix, rest)
 
         def upstream_to_client():
             try:
@@ -235,8 +253,11 @@ def create_app(settings=None):
                 client.close()
             except Exception:    # noqa: BLE001
                 pass
-            log.info("%s WS /%s/ws/%s cerrado", rid, service.name, rest)
+            log.info("%s WS %s/ws/%s cerrado", rid, prefix, rest)
 
+    # sock.route() no devuelve la funcion, asi que no se pueden apilar decoradores: se registra la misma funcion dos veces.
+    sock.route("/api/<service_name>/ws/<path:rest>", endpoint="websocket_api")(websocket_proxy)
+    sock.route("/<service_name>/ws/<path:rest>", endpoint="websocket_legacy")(websocket_proxy)
     return app
 
 

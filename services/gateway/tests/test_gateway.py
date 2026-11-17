@@ -27,6 +27,48 @@ def test_library_conserva_su_prefijo_porque_el_monolito_lo_usa(stack):
     assert d["service"] == "library" and d["path"] == "/library/uploads/seed/978-1.jpg"      # NO se recorta
 
 
+ALIAS = {"login": "auth", "books": "soap", "libros": "soap", "usuarios": "users", "autores": "authors",
+         "auth": "auth", "soap": "soap", "users": "users", "authors": "authors", "pedidos": "pedidos", "pagos": "pagos",
+         "gps": "gps"}
+
+
+@pytest.mark.parametrize("nombre,servicio", sorted(ALIAS.items()))
+def test_api_llega_al_servicio_por_su_nombre_o_su_alias(stack, nombre, servicio):
+    gw, _ = stack
+    d = get(f"{gw}/api/{nombre}/echo/uno?x=1").json()
+    assert d["service"] == servicio and d["path"] == "/echo/uno" and d["query"] == "x=1"     # /api/<nombre> se recorta
+    assert d["headers"]["x-forwarded-prefix"] == f"/api/{nombre}"
+
+
+def test_api_conserva_los_prefijos_antiguos_y_no_expone_el_monolito(stack):
+    gw, _ = stack
+    assert get(f"{gw}/auth/echo").json()["service"] == "auth"                # compatibilidad con las apps ya entregadas
+    assert get(f"{gw}/api/library/uploads/x.jpg").status_code == 404         # el monolito vive en "/", no en /api
+    assert get(f"{gw}/api/nadie/echo").json()["error"] == "unknown_service"
+
+
+@pytest.mark.parametrize("ruta", ["/api/pedidos/", "/api/login/", "/pedidos/", "/auth/"])
+def test_la_raiz_de_un_servicio_no_se_redirige_a_otro_prefijo(stack, ruta):
+    gw, _ = stack
+    r = get(f"{gw}{ruta}")
+    assert r.status_code == 404 and "Location" not in r.headers      # el 404 es del servicio falso, no una redireccion
+
+
+def test_api_indice_y_health(stack):
+    gw, _ = stack
+    for path in ("/api", "/api/"):
+        api = get(f"{gw}{path}").json()["api"]
+        assert "/api/login/" in api and "/api/books/" in api and "/api/usuarios/" in api and "/api/library/" not in api
+    h = get(f"{gw}/api/health").json()
+    assert h["service"] == "gateway" and h["upstreams"]["auth"] == "up"
+
+
+def test_api_reescribe_redirecciones_con_el_prefijo_usado(stack):
+    gw, _ = stack
+    assert get(f"{gw}/api/login/redirect").headers["Location"] == "/api/login/echo/final"
+    assert get(f"{gw}/api/books/redirect-absolute").headers["Location"] == "/api/books/echo/final"
+
+
 def test_query_string_y_metodos(stack):
     gw, _ = stack
     for method in ("POST", "PUT", "PATCH", "DELETE"):
@@ -175,6 +217,14 @@ def test_websocket_de_rastreo_pasa_por_el_gateway(stack):
     assert snap["request_id"]
     ws.send("ping")
     assert ws.recv() == "eco:ping"
+    ws.close()
+
+
+def test_websocket_tambien_por_api(stack):
+    gw, _ = stack
+    ws = websocket.create_connection(ws_url(gw, "/api/gps/ws/tracking"), timeout=5)
+    ws.send("{}")
+    assert json.loads(ws.recv())["service"] == "gps"
     ws.close()
 
 

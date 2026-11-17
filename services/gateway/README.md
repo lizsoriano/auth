@@ -35,6 +35,23 @@ Es la **única puerta** hacia los microservicios. Las apps (Java, Tkinter, Elect
 
 Los **contratos de los servicios no cambian** y los prefijos son los de siempre (`/auth`, `/soap`, `/users`, `/authors`, `/pedidos`, `/pagos`, `/gps`), así que las apps solo cambian de dirección base, no de código. `/library` (el monolito que sirve las portadas) lo atiende directo Nginx en la VM; el gateway también lo enruta (conservando el prefijo, porque el monolito sirve todo bajo `/library`) para que **una sola dirección** baste incluso en local.
 
+## Rutas: `/api/...` para los microservicios y `/` para el monolito
+
+Nginx reparte por la ruta: **todo lo que empieza con `/api/` es la API** (va al gateway) y **todo lo demás (`/`) es el monolito** (`127.0.0.1:3000`; su web y las portadas viven bajo `/library/`, y `/` redirige a `/library/`). Dentro de `/api/`, cada servicio es un nombre y lo que sigue es el endpoint tal cual del servicio:
+
+| Ruta pública | Servicio | Ejemplo |
+|---|---|---|
+| `/api/login/…` | Login | `POST /api/login/login`, `/api/login/token/refresh`, `/api/login/logout` |
+| `/api/books/…` (o `/api/libros/`) | Books / SOAP | `GET /api/books/books` |
+| `/api/users/…` (o `/api/usuarios/`) | Users | `GET /api/users/users/me` |
+| `/api/authors/…` (o `/api/autores/`) | Authors | `GET /api/authors/authors` |
+| `/api/pedidos/…` | Pedidos | `POST /api/pedidos/pedidos` |
+| `/api/pagos/…` | Pagos | `POST /api/pagos/pagos` (con `Idempotency-Key`) |
+| `/api/gps/…` | Rastreo | `GET /api/gps/tracking/<código>`, WebSocket `/api/gps/ws/tracking` |
+| `/api/health` | Gateway | estado `up/down` de cada servicio |
+
+`/api/library` **no existe**: el monolito no es parte de la API. Los prefijos de antes (`/auth`, `/soap`, `/users`, `/authors`, `/pedidos`, `/pagos`, `/gps`) siguen funcionando para no romper las apps ya entregadas.
+
 ## Ejecutar en local
 
 ```bash
@@ -60,7 +77,7 @@ Si los servicios corren como contenedores o *pods* en lugar de procesos, solo ca
 ## Pruebas
 
 ```bash
-.venv/Scripts/python -m pytest -q     # 32 pruebas: enrutamiento, encabezados, cookies, redirecciones, 413/502/504, health y WebSocket
+.venv/Scripts/python -m pytest -q     # 52 pruebas: enrutamiento, encabezados, cookies, redirecciones, 413/502/504, health y WebSocket
 ```
 
 Usan servicios falsos en puertos libres. Además, `e2e/verificar_gateway.py` recorre el flujo real (login → perfil → catálogo → pedido → pago → rastreo REST y WebSocket) **solo a través del gateway** contra la pila local.

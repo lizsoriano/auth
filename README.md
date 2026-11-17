@@ -7,8 +7,11 @@ Monorepo de seis microservicios Flask con PostgreSQL (`library_db`, fuente de ve
 Las apps (Java, Tkinter, Electron) hablan **solo con el gateway**; los servicios y PostgreSQL escuchan únicamente en `127.0.0.1`:
 
 ```
-apps ──► Nginx :80 (única puerta pública, por IP) ──► API Gateway 127.0.0.1:8080 ──► servicios 127.0.0.1 (5000–5005, 5900) ──► PostgreSQL / Redis
+apps ──► Nginx :80 (única puerta pública, por IP) ─┬─ /api/…  ──► API Gateway 127.0.0.1:8080 ──► servicios 127.0.0.1 (5000–5005, 5900) ──► PostgreSQL / Redis
+                                                     └─ /       ──► monolito 127.0.0.1:3000 (su web vive en /library/)
 ```
+
+Los microservicios son la **API** (`/api/login`, `/api/books`, `/api/users`, `/api/authors`, `/api/pedidos`, `/api/pagos`, `/api/gps`) y todo lo relacionado con el monolito es `/`.
 
 El [gateway](services/gateway/README.md) enruta por prefijo (`/auth`, `/soap`, `/users`, `/authors`, `/pedidos`, `/pagos`, `/gps` con su WebSocket), reenvía el JWT sin tocarlo y no reimplementa ningún servicio. Despliegue: `deploy/setup_gateway_vm.sh` (con `--rollback`). Verificación de punta a punta: `e2e/verificar_gateway.py`.
 
