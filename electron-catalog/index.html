@@ -41,15 +41,12 @@
       </form>
 
       <details class="login-settings">
-        <summary>URLs de los microservicios</summary>
-        <label for="auth-url">AUTH_URL (login, puerto 5000)</label>
-        <input id="auth-url" type="url" spellcheck="false" />
-        <label for="books-url">BOOKS_URL (books, puerto 5001)</label>
-        <input id="books-url" type="url" spellcheck="false" />
-        <label for="image-base-url">Base de imágenes (monolito, /library)</label>
-        <input id="image-base-url" type="url" spellcheck="false" />
+        <summary>Dirección del gateway</summary>
+        <label for="gateway-url">Gateway (una sola dirección: http://IP o http://localhost:8080)</label>
+        <input id="gateway-url" type="text" spellcheck="false" placeholder="http://localhost:8080" />
+        <p id="gateway-routes" class="hint"></p>
         <button id="save-urls" type="button">Guardar</button>
-        <p class="hint">Se guardan localmente en esta computadora.</p>
+        <p class="hint">Cada servicio es una ruta del gateway (/auth, /soap, /library…). Se guarda localmente en esta computadora.</p>
       </details>
     </section>
 

@@ -1,14 +1,21 @@
-// URLs por defecto: los tres microservicios publicados por Nginx en la VM
-// (127.0.0.1 en la VM, expuestos por Nginx bajo /auth y /soap -- no se
-// exponen los puertos crudos 5000/5001 directo a Internet, ver
-// deploy/nginx-auth-proxy.conf y deploy/nginx-soap-proxy.conf).
-const DEFAULT_AUTH_URL = "http://34.51.89.7/auth";
-const DEFAULT_BOOKS_URL = "http://34.51.89.7/soap";
-const DEFAULT_IMAGE_BASE_URL = "http://34.51.89.7/library";
+// UNA sola dirección: la del API Gateway (Nginx -> gateway -> servicios; los servicios y los puertos crudos 5000/5001...
+// no se exponen a Internet, ver services/gateway y deploy/nginx-gateway-proxy.conf). Cada servicio es una ruta de ella:
+// /auth (login), /soap (books) y /library (portadas del monolito). Por omisión, el gateway de esta computadora; en la
+// instancia de GCP basta la IP (cambia cada vez que se enciende), p. ej. 34.51.109.238.
+const DEFAULT_GATEWAY_URL = "http://localhost:8080";
 const PAGE_SIZE = 9;
 const STATUS_POLL_MS = 10000;
 
-const K = { auth: "catalog.auth-url", books: "catalog.books-url", image: "catalog.image-base-url" };
+const K = { gateway: "catalog.gateway-url" };
+
+// "34.1.2.3", "localhost:8080/x" o "https://host/" -> "esquema://host[:puerto]" (sin ruta ni barra final).
+function normalizeGateway(value) {
+  let text = (value || "").trim();
+  if (!text) return DEFAULT_GATEWAY_URL;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) text = "http://" + text;
+  const match = text.match(/^(https?:\/\/[^/\s?#]+)/i);
+  return match ? match[1] : text.replace(/\/+$/, "");
+}
 
 let books = [];
 let currentPage = 1;
@@ -21,7 +28,7 @@ const elements = {
   loginForm: el("login-form"), registerForm: el("register-form"),
   loginEmail: el("login-email"), loginPassword: el("login-password"), loginError: el("login-error"),
   registerError: el("register-error"), registerOk: el("register-ok"),
-  authUrl: el("auth-url"), booksUrl: el("books-url"), imageBaseUrl: el("image-base-url"),
+  gatewayUrl: el("gateway-url"), gatewayRoutes: el("gateway-routes"),
   sessionUser: el("session-user"),
   tabCatalog: el("tab-catalog"), tabStatus: el("tab-status"),
   catalogView: el("catalog-view"), statusView: el("status-view"),
@@ -31,21 +38,23 @@ const elements = {
 };
 
 function urls() {
-  return {
-    auth: (elements.authUrl.value || DEFAULT_AUTH_URL).trim().replace(/\/+$/, ""),
-    books: (elements.booksUrl.value || DEFAULT_BOOKS_URL).trim().replace(/\/+$/, ""),
-    image: (elements.imageBaseUrl.value || DEFAULT_IMAGE_BASE_URL).trim().replace(/\/+$/, "")
-  };
+  const base = normalizeGateway(elements.gatewayUrl.value);
+  return { gateway: base, auth: `${base}/auth`, books: `${base}/soap`, image: `${base}/library` };
 }
 
-elements.authUrl.value = localStorage.getItem(K.auth) || DEFAULT_AUTH_URL;
-elements.booksUrl.value = localStorage.getItem(K.books) || DEFAULT_BOOKS_URL;
-elements.imageBaseUrl.value = localStorage.getItem(K.image) || DEFAULT_IMAGE_BASE_URL;
+function showGatewayRoutes() {
+  const u = urls();
+  elements.gatewayRoutes.textContent = `login: ${u.auth} · books: ${u.books} · portadas: ${u.image}`;
+}
+
+elements.gatewayUrl.value = localStorage.getItem(K.gateway) || DEFAULT_GATEWAY_URL;
+elements.gatewayUrl.addEventListener("input", showGatewayRoutes);
+showGatewayRoutes();
 
 el("save-urls").addEventListener("click", () => {
-  localStorage.setItem(K.auth, elements.authUrl.value.trim());
-  localStorage.setItem(K.books, elements.booksUrl.value.trim());
-  localStorage.setItem(K.image, elements.imageBaseUrl.value.trim());
+  elements.gatewayUrl.value = normalizeGateway(elements.gatewayUrl.value);
+  localStorage.setItem(K.gateway, elements.gatewayUrl.value);
+  showGatewayRoutes();
 });
 
 // ------------------------------------------------------------- utilidades

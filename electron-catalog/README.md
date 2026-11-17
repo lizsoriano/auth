@@ -1,6 +1,6 @@
 # Catálogo de libros para Windows 11
 
-Aplicación Electron que consume exclusivamente el XML de un endpoint de libros. Por defecto usa `http://34.51.75.204:5001/books`; se puede cambiar desde **Configuración** y queda guardado en `localStorage`.
+Aplicación Electron que consume exclusivamente el XML de un endpoint de libros. Habla con **una sola dirección: la del API Gateway** (Nginx → gateway → servicios). Cada servicio es una ruta de esa dirección: `/auth` (login), `/soap` (books, de donde sale el catálogo) y `/library` (portadas). Por defecto usa el gateway de esta computadora, `http://localhost:8080`; en la instancia de GCP basta escribir su IP (cambia cada vez que se enciende), por ejemplo `34.51.109.238`. Se cambia en el panel **Dirección del gateway** de la pantalla de inicio de sesión y queda guardada en `localStorage`.
 
 ## Ejecutar
 
@@ -18,4 +18,4 @@ Los campos `autor(es)`, `stock` y `año` se mostrarán como `No disponible` mien
 
 La aplicación consulta `GET /books` y después `GET /books/images`. Este último debe existir en `services/soap/rest_api.py` y la base debe tener aplicada `services/soap/sql/ejercicio05_extension.sql`.
 
-El XML de imágenes contiene rutas como `/uploads/portada.jpg`. Configura **Ubicación pública de imágenes** con el host que realmente las sirve, por ejemplo `http://<IP-O-DOMINIO>/library`; la app combina esa base con la ruta XML y persiste el valor en `localStorage`. La ruta debe ser pública y devolver `200` con `Content-Type: image/*` desde Windows.
+El XML de imágenes contiene rutas como `/uploads/portada.jpg`. Las portadas salen de la misma dirección del gateway, bajo `/library` (por ejemplo `http://<IP>/library/uploads/portada.jpg`); la app combina esa base con la ruta XML. La ruta debe ser pública y devolver `200` con `Content-Type: image/*` desde Windows.
