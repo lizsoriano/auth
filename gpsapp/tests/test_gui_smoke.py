@@ -61,11 +61,17 @@ def pump(window, seconds):
 def test_start_publishes_every_vehicle_and_draws_them(app):
     app.start()
     pump(app, 0.5)
-    ids = {p["vehicle_id"] for p in app.sender.offered}
-    assert ids == {"V001", "V002", "V003"}
-    assert len(app.sender.offered) >= 9                     # ~3 vehículos × varios ticks
+    sent = [p for batch in app.sender.offered for p in batch]       # cada envío es un LOTE (lista) de posiciones
+    assert {p["vehicle_id"] for p in sent} == {"V001", "V002", "V003"}
+    assert len(app.sender.offered) >= 3 and len(sent) >= 9          # varios ciclos × 3 vehículos
+    assert all(len(batch) == 3 for batch in app.sender.offered)     # un mensaje por ciclo, no uno por vehículo
+    assert all(p.get("street") for p in sent)                       # van por calles reales, con nombre
+    assert app.real_routes and "REALES" in app.route_info
     assert len(app.table.get_children()) == 3
-    assert len(app.canvas.find_withtag("vehicle")) == 6     # triángulo + etiqueta por vehículo
+    drawn = len(app.canvas.find_withtag("vehicle"))
+    assert drawn >= 3 * 3 and drawn % 3 == 0                # marcador (halo, cuerpo, flecha) y etiqueta por vehículo
+    assert app.kpi_count.get() == "3" and float(app.kpi_avg.get()) > 0        # indicadores de la flota
+    assert float(app.kpi_km.get()) > 0 and int(app.kpi_streets.get()) >= 1
     assert len(app.canvas.find_withtag("route")) > 0
     assert app.status.get() == "Conectado"
 
@@ -82,7 +88,7 @@ def test_stop_halts_publishing_and_releases_the_sender(app):
 
 
 @pytest.mark.parametrize("field, value", [("url", "http://x"), ("url", "ws://h/ws?role=map"),
-                                          ("count", 0), ("count", 11), ("interval", 0.01)])
+                                          ("count", 0), ("count", 101), ("interval", 0.01)])
 def test_invalid_settings_do_not_start(app, field, value):
     getattr(app, field).set(value)
     app.start()

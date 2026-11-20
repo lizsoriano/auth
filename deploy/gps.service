@@ -1,0 +1,18 @@
+[Unit]
+Description=Library gps service (Flask + Flask-Sock, rastreo de pedidos, puerto 5900, loopback)
+After=network.target
+
+[Service]
+User=rutil
+WorkingDirectory=/opt/auth/services/gps
+# JWT_SECRET_KEY (el mismo de login), PEDIDOS_URL y los tiempos del rastreo viven en .env (permisos 600)
+EnvironmentFile=/opt/auth/services/gps/.env
+# UN solo proceso: las entregas simuladas viven en memoria; los hilos atienden los WebSockets (uno por cliente conectado).
+ExecStart=/opt/auth/services/gps/.venv/bin/gunicorn -w 1 --threads 100 -b 127.0.0.1:5900 app:app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
