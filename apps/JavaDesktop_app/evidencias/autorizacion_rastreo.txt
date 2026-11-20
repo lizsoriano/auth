@@ -1,0 +1,10 @@
+1. El personal crea un pedido (#112) y todavía NO lo paga:
+   POST /tracking del dueño sin pago      -> order_not_paid
+2. Ya pagado (código LIB-MTY-2026-000112):
+   dueño (personal) GET /tracking/<código> -> 200
+   OTRO cliente     GET /tracking/<código> -> 404 order_not_found
+   sin token        GET /tracking/<código> -> token_missing
+   token falso      WebSocket              -> ('error', 'token_invalid')
+   OTRO cliente     WebSocket              -> ('error', 'order_not_found')
+   dueño (personal) WebSocket              -> ('snapshot', 'LIB-MTY-2026-000112')
+   código con formato inválido (REST)      -> invalid_code

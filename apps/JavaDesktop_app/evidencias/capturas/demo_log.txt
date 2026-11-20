@@ -1,0 +1,26 @@
+22:55:06  Captura guardada: 01_login.png
+22:55:08  Inicio de sesión correcto: JWT obtenido del servicio Login.
+22:55:12  Captura guardada: 02_catalogo.png
+22:55:12  Catálogo: 3 libros desde Books.
+22:55:13  Captura guardada: 03_cesta.png
+22:55:13  Validación de la cesta contra Books: precios y stock vigentes
+22:55:13    · Creando el pedido…
+22:55:13    · Registrando el pago simulado…
+22:55:13    · Generando el código de rastreo…
+22:55:13  Pedido #117 [pagado], pago aprobado, código de rastreo LIB-MTY-2026-000117
+22:55:16  Captura guardada: 04_mis_compras.png
+22:55:24  Captura guardada: 05_rastreo_preparando.png
+22:55:24  Rastreo recibido por WebSocket: preparando · 0 % de la ruta
+22:55:24    mapa: object 682x568 tiles=12 | Preparando pedido Calle General Juan Zuazua · 0% de la ruta
+22:55:44  Captura guardada: 06_rastreo_en_ruta.png
+22:55:44  Rastreo recibido por WebSocket: en_ruta · 19 % de la ruta
+22:55:44    mapa: object 682x568 tiles=12 | En ruta de entrega Calle Belisario Domínguez · 19% de la ruta
+22:56:03  Captura guardada: 07_rastreo_a_mitad.png
+22:56:03  Rastreo recibido por WebSocket: en_ruta · 58 % de la ruta
+22:56:03    mapa: object 682x568 tiles=12 | En ruta de entrega Calle Licenciado Benito Juárez · 58% de la ruta
+22:56:35  Captura guardada: 08_rastreo_entregado.png
+22:56:35  Rastreo recibido por WebSocket: entregado · 100 % de la ruta
+22:56:35    mapa: object 682x568 tiles=12 | Entregado Circuito las Acequias · 100% de la ruta
+22:56:37  Captura guardada: 09_perfil.png
+22:56:38  Captura guardada: 10_soap.png
+22:56:38  Recorrido terminado.

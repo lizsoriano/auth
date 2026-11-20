@@ -1,0 +1,7 @@
+# Estado local de la app (la contraseña NUNCA se guarda, pero estos archivos son de cada equipo)
+config.local.json
+cookies.local.txt
+session.local.json
+.venv/
+__pycache__/
+*.pyc

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mapa de rastreo</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  html, body, #map { height: 100%; margin: 0; background: #E8EEF6; font-family: "Segoe UI", Arial, sans-serif; }
+  .vehicle { width: 38px; height: 38px; border-radius: 50%; background: #2D6CDF; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4);
+             display: flex; align-items: center; justify-content: center; transition: transform 0.95s linear; }
+  .pin { padding: 3px 9px; border-radius: 12px; color: #fff; font-weight: 700; font-size: 12px; white-space: nowrap; box-shadow: 0 1px 5px rgba(0,0,0,.35); }
+  .pin.origin { background: #0E9AA7; } .pin.dest { background: #7C4DFF; }
+  #banner { position: absolute; z-index: 1000; left: 12px; top: 12px; background: rgba(11,31,58,.92); color: #fff; padding: 8px 14px;
+            border-radius: 12px; font-size: 14px; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+  #banner small { display: block; font-weight: 400; opacity: .85; font-size: 12px; }
+  #offline { display: none; position: absolute; inset: 0; z-index: 2000; background: #F2F6FA; color: #1E2B3C; padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="banner">Esperando el seguimiento…</div>
+<div id="offline"><h2>No se pudo cargar el mapa</h2><p>Leaflet y OpenStreetMap necesitan conexión a Internet. El seguimiento sigue funcionando en el panel de la derecha.</p></div>
+<script>
+  /* Leaflet mueve teselas y capas con translate3d; el WebKit de JavaFX no las repinta bien (se ve un mosaico a medias hasta
+     que el usuario mueve el mapa). Con L_DISABLE_3D usa posiciones normales (left/top) y se dibuja todo. */
+  window.L_DISABLE_3D = true;
+  window.L_NO_TOUCH = true;
+</script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  /* Puente Java → JavaScript: Java llama a LibMap.apply(mensaje) con cada mensaje del WebSocket (snapshot o update). */
+  var LibMap = (function () {
+    if (typeof L === 'undefined') { document.getElementById('offline').style.display = 'block'; return { apply: function () {}, ready: false }; }
+    /* El WebView de JavaFX (WebKit) no dispara siempre 'transitionend': con las animaciones de zoom de Leaflet el mapa se
+       queda a medias (solo se dibujan unas teselas). Sin animaciones el zoom termina de inmediato y se carga todo. */
+    var map = L.map('map', { zoomControl: true, zoomAnimation: false, fadeAnimation: false, markerZoomAnimation: false, inertia: false })
+      .setView([25.6866, -100.3161], 12);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+    var plan = null, trail = null, vehicle = null, origin = null, dest = null, fitted = false;
+    function resize() { map.invalidateSize({ animate: false }); }
+    function redraw() { map.invalidateSize({ animate: false }); map.setView(map.getCenter(), map.getZoom(), { reset: true, animate: false }); }
+    window.addEventListener('resize', resize);
+    if (window.ResizeObserver) { new ResizeObserver(resize).observe(document.getElementById('map')); }
+    setTimeout(resize, 300);
+    function pin(latlng, text, cls) {
+      return L.marker(latlng, { icon: L.divIcon({ className: '', html: '<div class="pin ' + cls + '">' + text + '</div>', iconAnchor: [0, 30] }) }).addTo(map);
+    }
+    function banner(msg) {
+      var p = msg.position || {};
+      document.getElementById('banner').innerHTML = (msg.status_text || '') +
+        '<small>' + (p.street ? p.street + ' · ' : '') + Math.round((msg.progress || 0) * 100) + '% de la ruta</small>';
+    }
+    return {
+      ready: true,
+      map: map,
+      apply: function (msg) {
+        if (msg.type === 'reset') {
+          [plan, trail, vehicle, origin, dest].forEach(function (layer) { if (layer) map.removeLayer(layer); });
+          plan = trail = vehicle = origin = dest = null; fitted = false;
+          document.getElementById('banner').innerHTML = 'Esperando el seguimiento…';
+          return;
+        }
+        if (msg.route && msg.route.length > 1) {
+          if (plan) map.removeLayer(plan);
+          plan = L.polyline(msg.route, { color: '#7C4DFF', weight: 4, opacity: .55, dashArray: '8 8' }).addTo(map);
+          if (origin) map.removeLayer(origin);
+          if (dest) map.removeLayer(dest);
+          origin = pin([msg.origin.latitude, msg.origin.longitude], msg.origin.name, 'origin');
+          dest = pin([msg.destination.latitude, msg.destination.longitude], 'Entrega: ' + msg.destination.name, 'dest');
+          if (!fitted) {
+            map.invalidateSize({ animate: false });
+            map.fitBounds(plan.getBounds(), { padding: [40, 40], animate: false });
+            fitted = true;
+            // El WebView termina de dar tamaño al mapa un instante después: se vuelve a calcular la vista para que Leaflet
+            // pida las teselas de TODA el área visible (sin esto solo se dibujaba una franja).
+            [250, 900, 2200].forEach(function (ms) { setTimeout(redraw, ms); });
+          }
+        }
+        if (msg.trail && msg.trail.length) {
+          if (trail) map.removeLayer(trail);
+          trail = L.polyline(msg.trail, { color: '#2D6CDF', weight: 6, opacity: .95 }).addTo(map);
+        } else if (trail && msg.position) {
+          trail.addLatLng([msg.position.latitude, msg.position.longitude]);
+        }
+        if (msg.position) {
+          var ll = [msg.position.latitude, msg.position.longitude];
+          if (!vehicle) {
+            vehicle = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="vehicle"><svg width="24" height="24" viewBox="0 0 24 24"><path fill="#fff" d="M2 6h12v9H2z"/><path fill="#fff" d="M15 9h4l3 3v3h-7z"/><circle cx="7" cy="17" r="2.2" fill="#fff" stroke="#2D6CDF" stroke-width="1.6"/><circle cx="18" cy="17" r="2.2" fill="#fff" stroke="#2D6CDF" stroke-width="1.6"/></svg></div>', iconSize: [38, 38], iconAnchor: [19, 19] }), zIndexOffset: 1000 }).addTo(map);
+          } else {
+            vehicle.setLatLng(ll);
+          }
+          if (!map.getBounds().pad(-0.15).contains(ll)) { map.panTo(ll, { animate: false }); }
+        }
+        banner(msg);
+      }
+    };
+  })();
+</script>
+</body>
+</html>
