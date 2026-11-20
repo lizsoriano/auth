@@ -1,6 +1,6 @@
 # Catálogo de libros para Windows 11
 
-Aplicación Electron que consume exclusivamente el XML de un endpoint de libros. Habla con **una sola dirección: la del API Gateway** (Nginx → gateway → servicios). Cada servicio es una ruta de esa dirección: `/auth` (login), `/soap` (books, de donde sale el catálogo) y `/library` (portadas). Por defecto usa el gateway de esta computadora, `http://localhost:8080`; en la instancia de GCP basta escribir su IP (cambia cada vez que se enciende), por ejemplo `34.51.109.238`. Se cambia en el panel **Dirección del gateway** de la pantalla de inicio de sesión y queda guardada en `localStorage`.
+Aplicación Electron que consume exclusivamente el XML de un endpoint de libros. Habla con **una sola dirección: la del API Gateway** (Nginx → gateway → servicios). Cada servicio es una ruta de esa dirección: `/api/login` (login), `/api/books` (books, de donde sale el catálogo) y `/library` (portadas; el monolito vive en `/`). Por defecto usa el gateway de esta computadora, `http://localhost:8080`; en la instancia de GCP basta escribir su IP (cambia cada vez que se enciende), por ejemplo `34.51.109.238`. Se cambia en el panel **Dirección del gateway** de la pantalla de inicio de sesión y queda guardada en `localStorage`.
 
 ## Ejecutar
 

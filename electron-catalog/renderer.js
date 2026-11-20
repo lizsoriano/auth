@@ -1,6 +1,6 @@
 // UNA sola dirección: la del API Gateway (Nginx -> gateway -> servicios; los servicios y los puertos crudos 5000/5001...
 // no se exponen a Internet, ver services/gateway y deploy/nginx-gateway-proxy.conf). Cada servicio es una ruta de ella:
-// /auth (login), /soap (books) y /library (portadas del monolito). Por omisión, el gateway de esta computadora; en la
+// /api/login (login), /api/books (books) y /library (portadas: el monolito vive en "/"). Por omisión, el gateway de esta computadora; en la
 // instancia de GCP basta la IP (cambia cada vez que se enciende), p. ej. 34.51.109.238.
 const DEFAULT_GATEWAY_URL = "http://localhost:8080";
 const PAGE_SIZE = 9;
@@ -39,7 +39,7 @@ const elements = {
 
 function urls() {
   const base = normalizeGateway(elements.gatewayUrl.value);
-  return { gateway: base, auth: `${base}/auth`, books: `${base}/soap`, image: `${base}/library` };
+  return { gateway: base, auth: `${base}/api/login`, books: `${base}/api/books`, image: `${base}/library` };
 }
 
 function showGatewayRoutes() {
