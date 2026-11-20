@@ -17,7 +17,7 @@ Es la **única puerta** hacia los microservicios. Las apps (Java, Tkinter, Elect
 
 **Reglas de la arquitectura**
 
-1. Las apps → solo el gateway. Nginx reenvía todo a `127.0.0.1:8080` (`deploy/nginx-gateway-proxy.conf`).
+1. Las apps → solo el gateway. Nginx reenvía todo a `127.0.0.1:8080` (`deploy/nginx/2-prefijos-api.conf`; el resto de la configuración de Nginx está en los otros 3 archivos de `deploy/nginx/`).
 2. Los servicios (y el propio gateway) en `127.0.0.1`: ningún puerto interno se abre en el firewall de GCP.
 3. La base de datos es solo para los servicios: el gateway no se conecta a PostgreSQL ni a Redis.
 

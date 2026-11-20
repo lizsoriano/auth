@@ -8,7 +8,7 @@
 #   1. venv + dependencias de services/gateway (Flask, Flask-Sock, requests, websocket-client, gunicorn).
 #   2. services/gateway/.env (sin secretos) a partir de .env.example si no existe.
 #   3. unit systemd gateway.service (127.0.0.1:8080).
-#   4. Nginx: instala library-gateway.conf y APARTA los .conf por servicio (soap-proxy, auth-proxy, library-microservices,
+#   4. Nginx: instala los 4 archivos de deploy/nginx/ (proxy, prefijos /api, monolito, websocket) y APARTA los .conf por servicio (soap-proxy, auth-proxy, library-microservices,
 #      library-gps) a /etc/nginx/default.d.gateway-backup/ para que la unica ruta sea Nginx -> gateway -> servicios.
 #      /library (monolito de portadas) NO se toca. Si `nginx -t` falla, se restaura todo solo.
 #   5. Comprueba /gateway/health.
@@ -21,6 +21,8 @@ GW_DIR="$REPO/services/gateway"
 NGX_DIR=/etc/nginx/default.d
 BACKUP_DIR=/etc/nginx/default.d.gateway-backup
 OLD_CONFS=(soap-proxy.conf auth-proxy.conf library-microservices.conf library-gps.conf)
+# Los 4 archivos de deploy/nginx/ (el orden alfabetico importa: el WebSocket debe ir antes que la regla de prefijos).
+NEW_CONFS=(10-library-websocket.conf 20-library-api.conf 30-library-monolito.conf)
 say() { printf '\n== %s\n' "$*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
@@ -29,7 +31,7 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 restore_old() {
   [ -d "$BACKUP_DIR" ] || return 0
   for f in "${OLD_CONFS[@]}"; do [ -f "$BACKUP_DIR/$f" ] && cp -f "$BACKUP_DIR/$f" "$NGX_DIR/$f"; done
-  rm -f "$NGX_DIR/library-gateway.conf"
+  rm -f "$NGX_DIR/library-gateway.conf" "${NEW_CONFS[@]/#/$NGX_DIR/}"
 }
 
 if [ "${1:-}" = "--rollback" ]; then
@@ -85,7 +87,12 @@ mkdir -p "$BACKUP_DIR"
 for f in "${OLD_CONFS[@]}"; do
   if [ -f "$NGX_DIR/$f" ]; then cp -n "$NGX_DIR/$f" "$BACKUP_DIR/$f"; rm -f "$NGX_DIR/$f"; echo "  apartado: $f"; fi
 done
-install -m 644 "$REPO/deploy/nginx-gateway-proxy.conf" "$NGX_DIR/library-gateway.conf"
+rm -f "$NGX_DIR/library-gateway.conf"          # la version de un solo archivo de un despliegue anterior
+mkdir -p /etc/nginx/library
+install -m 644 "$REPO/deploy/nginx/1-proxy-headers.conf" /etc/nginx/library/proxy-headers.conf
+install -m 644 "$REPO/deploy/nginx/4-websocket.conf"     "$NGX_DIR/10-library-websocket.conf"
+install -m 644 "$REPO/deploy/nginx/2-prefijos-api.conf"  "$NGX_DIR/20-library-api.conf"
+install -m 644 "$REPO/deploy/nginx/3-monolito.conf"      "$NGX_DIR/30-library-monolito.conf"
 if ! NGX=$(nginx -t 2>&1); then
   echo "$NGX"; restore_old; nginx -t >/dev/null 2>&1 || true
   die "nginx -t fallo: se restauraron los .conf anteriores (no se recargo Nginx)"
